@@ -1,0 +1,41 @@
+[package]
+name = "obbenchmark"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"]}
+serde_json = "1.0"
+serde_derive = "1.0"
+tungstenite = { version= "0.20.1", features = ["native-tls"]}
+url = "2.1.0"
+reqwest = { version = "0.11", features = ["blocking", "json"] }
+base64 = "0.21.4"
+hex = "0.4.3"
+
+
+
+chrono = { version = "0.4.31", features = [] }
+tokio = { version = "1", features = ["full"] }
+dotenv = "0.15.0"
+tokio-tungstenite = { version = "0.17", features = ["native-tls"] }
+log = "0.4"
+env_logger = "0.10.0"
+
+rust_decimal = "1.17.0"
+tracing-subscriber = { version = "0.3.16", features = ["json"] }
+tracing = "0.1.40"
+tracing-appender = "0.2.3"
+
+prost = "0.12.3"
+prost-types = "0.12.3"
+prost-build = "0.12.3"
+rand = "0.8.5"
+diesel = { version = "2.1.4", features = ["sqlite"] }
+bigdecimal = "0.4.2"
+thiserror = "1.0.50"
+
+[build-dependencies]
+prost-build = "0.12.3"
