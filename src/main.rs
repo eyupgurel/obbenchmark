@@ -11,7 +11,6 @@ use diesel::sqlite::SqliteConnection;
 use diesel::select;
 
 
-
 use std::{fs, iter, thread};
 use std::sync::mpsc;
 use rand::distributions::Alphanumeric;
@@ -72,7 +71,7 @@ pub fn establish_connection() -> SqliteConnection {
 }
 
 #[derive(Insertable)]
-#[table_name="orders"]
+#[table_name = "orders"]
 struct NewOrder<'a> {
     market: &'a str,
     price: i64,
@@ -88,7 +87,7 @@ struct NewOrder<'a> {
 
 // Define a struct to represent the fields you want to update
 #[derive(AsChangeset)]
-#[table_name="orders"]
+#[table_name = "orders"]
 struct OrderUpdate<'a> {
     price: Option<i64>,
     quantity: Option<i64>,
@@ -109,7 +108,7 @@ fn update_order<'a>(
     new_leverage: Option<i64>,
     new_expiration: Option<i64>,
     new_maker: Option<&'a str>,
-    new_flags: Option<&'a str>
+    new_flags: Option<&'a str>,
 ) -> QueryResult<usize> {
     use self::orders::dsl::*;
 
@@ -150,6 +149,7 @@ fn get_orders_ordered_by_price_timestamp(connection: &mut SqliteConnection, perp
 
     result
 }
+
 fn generate_random_order<'a>(markets: &'a [&'a str], makers: &'a Vec<String>, flags: &'a Vec<String>) -> NewOrder<'a> {
     let mut rng = rand::thread_rng();
     let market = markets[rng.gen_range(0..markets.len())]; // Randomly choose a market
@@ -182,6 +182,7 @@ fn generate_random_makers_and_flags(count: usize) -> (Vec<String>, Vec<String>) 
 
     (makers, flags)
 }
+
 fn generate_random_orders<'a>(markets: &'a [&'a str], makers: &'a Vec<String>, flags: &'a Vec<String>, count: usize) -> Vec<NewOrder<'a>> {
     let mut orders = Vec::new();
     for _ in 0..count {
@@ -214,7 +215,6 @@ fn delete_order_by_id(connection: &mut SqliteConnection, order_id: i32) -> Query
 }
 
 fn main() {
-
     let config_str =
         fs::read_to_string("src/config/config.json").expect("Unable to read config.json");
     let config: Config = serde_json::from_str(&config_str).expect("JSON was not well-formatted");
@@ -225,21 +225,30 @@ fn main() {
     let (tx_binance_ob, rx_binance_ob) = mpsc::channel();
     let (tx_binance_ob_diff, rx_binance_ob_diff) = mpsc::channel();
 
-    let client = reqwest::blocking::Client::new();
     let vars: EnvVars = env::env_variables();
-    let j: Result<BinanceOrderBook, Box<dyn std::error::Error>> = client
-        .get(&  "https://fapi.binance.com/fapi/v1/depth?symbol=BTCUSDT&limit=100".to_string())
+
+    let client = reqwest::blocking::Client::new();
+
+    let order_book_result: Result<BinanceOrderBook, Box<dyn std::error::Error>> = client
+        .get(&"https://fapi.binance.com/fapi/v1/depth?symbol=BTCUSDT&limit=100".to_string())
         .send()
         .map_err(|e| format!("Error making the request: {}", e).into())
         .and_then(|res| {
             res.text()
                 .map_err(|e| format!("Error reading the response body: {}", e).into())
         })
-        .and_then(|body| serde_json::from_str(&body).map_err(Into::into));
+        .and_then(|body|
+            serde_json::from_str(&body).
+                map_err(Into::into));
 
 
-
-
+    let order_book = order_book_result
+        .map(|response| response)
+        .map_err(|e| {
+            tracing::error!("Error: {}", e);
+            e
+        })
+        .unwrap();
     let handle_binance_ob = thread::spawn(move || {
         let ob_stream = BinanceOrderBookStream::<DepthUpdate>::new();
         let url = format!(
@@ -292,38 +301,29 @@ fn main() {
         match rx_binance_ob.try_recv() {
             Ok(value) => {
                 tracing::info!("binance ob: {:?}", value);
-
             }
             Err(mpsc::TryRecvError::Empty) => {
                 // No message from binance yet
             }
             Err(mpsc::TryRecvError::Disconnected) => {
                 tracing::debug!("Binance worker has disconnected!");
-
             }
         }
 
         match rx_binance_ob_diff.try_recv() {
             Ok(value) => {
                 tracing::debug!("diff of binance ob: {:?}", value);
-
             }
             Err(mpsc::TryRecvError::Empty) => {
                 // No message from binance yet
             }
             Err(mpsc::TryRecvError::Disconnected) => {
                 tracing::debug!("Binance worker has disconnected!");
-
-
             }
         }
     }
 
     handle_binance_ob.join().expect("Thread failed to join main");
-
-
-
-
 }
 
 
@@ -336,7 +336,7 @@ mod tests {
     use rand::prelude::SliceRandom;
 
     // Helper function to create and populate the test database
-    fn setup_test_database(count:usize) -> SqliteConnection {
+    fn setup_test_database(count: usize) -> SqliteConnection {
         let mut connection = establish_connection();
 
         let markets = ["ETH-PERP", "BTC-PERP", "SOL-PERP"];
@@ -382,7 +382,7 @@ mod tests {
         // Arrange: Setup the test database
         let mut connection = establish_connection();
         let markets = ["ETH-PERP", "BTC-PERP", "SOL-PERP"];
-        let order_size:usize = 100000;
+        let order_size: usize = 100000;
         let (makers, flags) = generate_random_makers_and_flags(order_size);
         let random_orders = generate_random_orders(&markets, &makers, &flags, order_size);
 
@@ -445,7 +445,6 @@ mod tests {
             .expect("Error loading order IDs");
 
 
-
         // Randomly select a subset of order IDs to delete
         let mut rng = rand::thread_rng();
 
@@ -476,7 +475,7 @@ mod tests {
         let mut connection = setup_test_database(10); // Adjust the number as needed
 
 
-       // Act: Update the inserted order
+        // Act: Update the inserted order
         let updated_rows = update_order(
             &mut connection,
             1, // Use the ID of the inserted order
@@ -486,7 +485,7 @@ mod tests {
             None, // Not updating leverage
             None, // Not updating expiration
             Some("UpdatedMaker"), // New maker
-            None  // Not updating flags
+            None,  // Not updating flags
         ).expect("Error updating order");
 
         // Assert: Verify that the order was updated correctly
@@ -501,5 +500,4 @@ mod tests {
         assert_eq!(updated_order.4, 25); // Check if quantity is updated to 25
         assert_eq!(updated_order.9, "UpdatedMaker"); // Check if maker is updated*/
     }
-
 }
