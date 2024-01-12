@@ -51,10 +51,14 @@ pub struct OrderBook {
 #[serde(rename_all = "camelCase")]
 pub struct BinanceOrderBook {
     pub last_update_id: u64,
+    #[serde(rename = "E")]
     pub e: u64, // Message output time
+    #[serde(rename = "T")]
     pub t: u64, // Transaction time
-    pub bids: Vec<BidAsk>,
-    pub asks: Vec<BidAsk>,
+    #[serde(deserialize_with = "deserialize_as_string_tuples")]
+    pub asks: Vec<(f64, f64)>,
+    #[serde(deserialize_with = "deserialize_as_string_tuples")]
+    pub bids: Vec<(f64, f64)>
 }
 
 #[derive(Serialize, Deserialize, Debug)]
