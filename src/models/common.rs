@@ -47,6 +47,45 @@ pub struct OrderBook {
     pub bids: Vec<(f64, f64)>,
 }
 
+// Custom visitor to handle a vector of tuples
+struct TupleVecVisitor;
+
+impl<'de> Visitor<'de> for TupleVecVisitor {
+    type Value = Vec<(i64, i64)>;
+
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a vector of price-quantity tuples")
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: de::SeqAccess<'de>,
+    {
+        let mut vec = Vec::new();
+        while let Some((price, quantity)) = seq.next_element::<(String, String)>()? {
+            let price_decimal = Decimal::from_str(&price).map_err(de::Error::custom)?;
+            let quantity_decimal = Decimal::from_str(&quantity).map_err(de::Error::custom)?;
+            let price_i64 = (price_decimal * Decimal::new(10i64.pow(12), 0))
+                .to_i64()
+                .ok_or_else(|| de::Error::custom("Conversion to i64 failed"))?;
+            let quantity_i64 = (quantity_decimal * Decimal::new(10i64.pow(12), 0))
+                .to_i64()
+                .ok_or_else(|| de::Error::custom("Conversion to i64 failed"))?;
+            vec.push((price_i64, quantity_i64));
+        }
+        Ok(vec)
+    }
+}
+
+// Deserialize with the custom visitor
+fn deserialize_tuple_vec<'de, D>(deserializer: D) -> Result<Vec<(i64, i64)>, D::Error>
+    where
+        D: Deserializer<'de>,
+{
+    deserializer.deserialize_seq(TupleVecVisitor)
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct BinanceOrderBook {
@@ -55,10 +94,10 @@ pub struct BinanceOrderBook {
     pub e: u64, // Message output time
     #[serde(rename = "T")]
     pub t: u64, // Transaction time
-    #[serde(deserialize_with = "deserialize_as_string_tuples")]
-    pub asks: Vec<(f64, f64)>,
-    #[serde(deserialize_with = "deserialize_as_string_tuples")]
-    pub bids: Vec<(f64, f64)>
+    #[serde(deserialize_with = "deserialize_tuple_vec")]
+    pub asks: Vec<(i64, i64)>,
+    #[serde(deserialize_with = "deserialize_tuple_vec")]
+    pub bids: Vec<(i64, i64)>
 }
 
 #[derive(Serialize, Deserialize, Debug)]

@@ -163,7 +163,7 @@ fn generate_random_order<'a>(markets: &'a [&'a str], makers: &'a Vec<String>, fl
         timestamp: timestamp + rng.gen_range(10..=250),
         quantity: rng.gen_range(10_i64..=25),
         trigger_price: rng.gen::<u64>() as i64,
-        leverage: rng.gen::<u64>() as i64,
+        leverage: rng.gen_range(1..=20),
         expiration: rng.gen::<u64>() as i64,
         salt: rng.gen::<u64>() as i64,
         maker,
@@ -214,6 +214,27 @@ fn delete_order_by_id(connection: &mut SqliteConnection, order_id: i32) -> Query
     Ok(deleted_rows)
 }
 
+fn convert_order_book_entries_to_new_orders<'a>(
+    orders_data: &'a Vec<(i64, i64)>,
+    market: &'a str,
+    maker: &'a str,
+    flags: &'a str
+) -> Vec<NewOrder<'a>> {
+    orders_data.iter().map(|&(price, quantity)| {
+        NewOrder {
+            market,
+            price,
+            timestamp: Utc::now().timestamp(),
+            quantity,
+            trigger_price: 0,
+            leverage: 1,
+            expiration: 0,
+            salt: rand::random(),
+            maker,
+            flags,
+        }
+    }).collect()
+}
 fn main() {
     let config_str =
         fs::read_to_string("src/config/config.json").expect("Unable to read config.json");
@@ -249,29 +270,16 @@ fn main() {
             e
         })
         .unwrap();
-    let handle_binance_ob = thread::spawn(move || {
-        let ob_stream = BinanceOrderBookStream::<DepthUpdate>::new();
-        let url = format!(
-            "{}/ws/{}@depth5@100ms",
-            &vars.binance_websocket_url, &binance_market_for_ob
-        );
-        ob_stream.stream_ob_socket(
-            &url,
-            &binance_market_for_ob,
-            tx_binance_ob,
-            tx_binance_ob_diff,
-        );
-    });
 
+    let market = "ETH-PERP";
+    let maker = "SampleMaker";
+    let flags = "SampleFlags";
 
     let mut connection = establish_connection();
 
-    let markets = ["ETH-PERP", "BTC-PERP", "SOL-PERP"];
-    let (makers, flags) = generate_random_makers_and_flags(100000);
+    let new_orders = convert_order_book_entries_to_new_orders(&order_book.bids, market, maker, flags);
 
-    let random_orders = generate_random_orders(&markets, &makers, &flags, 100000);
-
-    for new_order in &random_orders {
+    for new_order in &new_orders {
         diesel::insert_into(orders::table)
             .values(new_order)
             .execute(&mut connection)
@@ -295,6 +303,25 @@ fn main() {
         println!("Flags: {}", flags);
         println!("-----------------------------");
     }
+
+
+
+
+    let handle_binance_ob = thread::spawn(move || {
+        let ob_stream = BinanceOrderBookStream::<DepthUpdate>::new();
+        let url = format!(
+            "{}/ws/{}@depth5@100ms",
+            &vars.binance_websocket_url, &binance_market_for_ob
+        );
+        ob_stream.stream_ob_socket(
+            &url,
+            &binance_market_for_ob,
+            tx_binance_ob,
+            tx_binance_ob_diff,
+        );
+    });
+
+
 
 
     loop {
