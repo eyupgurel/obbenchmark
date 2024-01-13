@@ -247,7 +247,6 @@ fn main() {
     let binance_market_for_ob = binance_market.clone();
     let vars: EnvVars = env::env_variables();
     let (tx_binance_ob, rx_binance_ob) = mpsc::channel();
-    let (tx_binance_ob_diff, rx_binance_ob_diff) = mpsc::channel();
 
     let vars: EnvVars = env::env_variables();
 
@@ -319,8 +318,7 @@ fn main() {
         ob_stream.stream_ob_socket(
             &url,
             &binance_market_for_ob,
-            tx_binance_ob,
-            tx_binance_ob_diff,
+            tx_binance_ob
         );
     });
 
@@ -340,17 +338,6 @@ fn main() {
             }
         }
 
-        match rx_binance_ob_diff.try_recv() {
-            Ok(value) => {
-                tracing::debug!("diff of binance ob: {:?}", value);
-            }
-            Err(mpsc::TryRecvError::Empty) => {
-                // No message from binance yet
-            }
-            Err(mpsc::TryRecvError::Disconnected) => {
-                tracing::debug!("Binance worker has disconnected!");
-            }
-        }
     }
 
     handle_binance_ob.join().expect("Thread failed to join main");
