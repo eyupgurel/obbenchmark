@@ -13,6 +13,7 @@ use diesel::select;
 
 use std::{fs, iter, thread};
 use std::sync::mpsc;
+use std::time::Instant;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use chrono::{Utc};
@@ -194,6 +195,12 @@ fn generate_random_orders<'a>(markets: &'a [&'a str], makers: &'a Vec<String>, f
     orders
 }
 
+fn delete_all_orders(connection: &mut SqliteConnection) -> QueryResult<usize> {
+    use self::orders::dsl::*;
+
+    diesel::delete(orders).execute(connection)
+}
+
 fn delete_orders_by_ids(connection: &mut SqliteConnection, order_ids: Vec<i64>) -> QueryResult<usize> {
     use self::orders::dsl::*;
 
@@ -239,13 +246,15 @@ fn convert_order_book_entries_to_new_orders<'a>(
     }).collect()
 }
 fn main() {
+    let vars: EnvVars = env::env_variables();
+    let _guard = env::init_logger(vars.log_level);
     let config_str =
         fs::read_to_string("src/config/config.json").expect("Unable to read config.json");
     let config: Config = serde_json::from_str(&config_str).expect("JSON was not well-formatted");
     let market = config.markets.first().unwrap();
     let binance_market = market.symbols.binance.to_owned();
     let binance_market_for_ob = binance_market.clone();
-    let vars: EnvVars = env::env_variables();
+
     let (tx_binance_ob, rx_binance_ob) = mpsc::channel();
 
     let vars: EnvVars = env::env_variables();
@@ -328,6 +337,27 @@ fn main() {
     loop {
         match rx_binance_ob.try_recv() {
             Ok(value) => {
+
+                let start_time = Instant::now();
+
+                delete_all_orders(&mut connection).expect("Error deleting orders");
+
+                let market = "ETH-PERP";
+                let maker = "SampleMaker";
+                let flags = "SampleFlags";
+
+
+                let new_orders = convert_order_book_entries_to_new_orders(&order_book.bids, market, maker, flags);
+                for new_order in &new_orders {
+                    diesel::insert_into(orders::table)
+                        .values(new_order)
+                        .execute(&mut connection)
+                        .expect("Error inserting new order");
+                }
+
+                let end_time = Instant::now();
+                let duration = end_time - start_time;
+                tracing::info!("orderbook refresh duration: {:?}", duration);
                 tracing::info!("binance ob: {:?}", value);
             }
             Err(mpsc::TryRecvError::Empty) => {
@@ -349,6 +379,7 @@ mod tests {
     use super::*;
     use diesel::connection::SimpleConnection;
     use std::time::{Instant, Duration};
+    use diesel::dsl::Order;
     use diesel::sql_query;
     use rand::prelude::SliceRandom;
 
@@ -516,5 +547,22 @@ mod tests {
         assert_eq!(updated_order.2, 200); // Check if price is updated to 200
         assert_eq!(updated_order.4, 25); // Check if quantity is updated to 25
         assert_eq!(updated_order.9, "UpdatedMaker"); // Check if maker is updated*/
+    }
+
+
+    #[test]
+    fn test_delete_all_orders() {
+        let mut connection = setup_test_database(100000);
+
+        // Perform the delete operation
+        let delete_count = delete_all_orders(&mut connection).expect("Error deleting orders");
+
+        // Assert that 10 records were deleted
+        assert_eq!(delete_count, 100000);
+
+        let orders = get_orders_ordered_by_price_timestamp(&mut connection, "ETH-PERP")
+            .expect("Error fetching orders");
+
+        assert_eq!(orders.len(),0);
     }
 }
