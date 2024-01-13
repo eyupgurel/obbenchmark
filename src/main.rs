@@ -258,7 +258,7 @@ fn main() {
     let binance_market_for_depth_diff = binance_market.clone();
 
 
-    let (tx_binance_ob, rx_binance_ob) = mpsc::channel();
+    //let (tx_binance_ob, rx_binance_ob) = mpsc::channel();
     let (tx_binance_depth_diff, rx_binance_depth_diff) = mpsc::channel();
 
     let vars: EnvVars = env::env_variables();
@@ -286,7 +286,7 @@ fn main() {
         })
         .unwrap();
 
-    let market = "ETH-PERP";
+    let market = "BTC-PERP";
     let maker = "SampleMaker";
     let flags = "SampleFlags";
 
@@ -301,7 +301,7 @@ fn main() {
             .expect("Error inserting new order");
     }
 
-    let orders = get_orders_ordered_by_price_timestamp(&mut connection, "ETH-PERP")
+    let orders = get_orders_ordered_by_price_timestamp(&mut connection, "BTC-PERP")
         .expect("Error fetching orders");
 
     for (id, market, price, timestamp, quantity, trigger_price, leverage, expiration, salt, maker, flags) in orders {
@@ -325,7 +325,7 @@ fn main() {
     let binance_websocket_url_for_ob = vars.binance_websocket_url.clone();
     let binance_websocket_url_for_depth_diff = vars.binance_websocket_url.clone();
 
-    let handle_binance_ob = thread::spawn(move || {
+/*    let handle_binance_ob = thread::spawn(move || {
         let ob_stream = BinanceOrderBookStream::<DepthUpdate>::new();
         let url = format!(
             "{}/ws/{}@depth20@100ms",
@@ -336,7 +336,7 @@ fn main() {
             &binance_market_for_ob,
             tx_binance_ob
         );
-    });
+    });*/
 
 // Now you can use binance_websocket_url_for_depth_diff for the second thread
     let handle_binance_diff = thread::spawn(move || {
@@ -354,7 +354,7 @@ fn main() {
 
 
     loop {
-        match rx_binance_ob.try_recv() {
+/*        match rx_binance_ob.try_recv() {
             Ok(value) => {
 
                 let start_time = Instant::now();
@@ -385,10 +385,65 @@ fn main() {
             Err(mpsc::TryRecvError::Disconnected) => {
                 tracing::debug!("Binance worker has disconnected!");
             }
-        }
+        }*/
 
         match rx_binance_depth_diff.try_recv() {
             Ok(value) => {
+
+                tracing::info!("bids count: {:?}", value.bids.len());
+
+                let start_time = Instant::now();
+
+                for bid in &value.bids {
+                    if(bid.0 > 0) {
+                        let updated_rows = update_order(
+                            &mut connection,
+                            bid.0, // Use the ID of the inserted order
+                            Some(bid.0), // New price
+                            Some(bid.1), // New quantity
+                            None, // Not updating trigger_price
+                            None, // Not updating leverage
+                            None, // Not updating expiration
+                            None, // New maker
+                            None,  // Not updating flags
+                        ).expect("Error updating order");
+                        tracing::info!("updated_rows: {:?}", updated_rows);
+                        if(updated_rows == 0){
+                          let new_order =  NewOrder {
+                                id:bid.0,
+                                market,
+                                price:bid.0,
+                                timestamp: Utc::now().timestamp(),
+                                quantity:bid.1,
+                                trigger_price: 0,
+                                leverage: 1,
+                                expiration: 0,
+                                salt: rand::random(),
+                                maker,
+                                flags,
+                            };
+                            diesel::insert_into(orders::table)
+                                .values(new_order)
+                                .execute(&mut connection)
+                                .expect("Error inserting new order");
+                        }
+
+                    } else {
+                        let delete_rows = delete_order_by_id(&mut connection, bid.0).expect("Error deleting order by id");
+                        tracing::info!("delete_rows: {:?}", delete_rows);
+                    }
+                }
+
+                let end_time = Instant::now();
+                let duration = end_time - start_time;
+                tracing::info!("orderbook update duration: {:?}", duration);
+
+
+
+
+
+
+
                 tracing::info!("binance depth diff: {:?}", value);
             }
             Err(mpsc::TryRecvError::Empty) => {
@@ -401,7 +456,7 @@ fn main() {
 
     }
 
-    handle_binance_ob.join().expect("Thread failed to join main");
+    //handle_binance_ob.join().expect("Thread failed to join main");
 }
 
 

@@ -118,7 +118,7 @@ pub struct DepthUpdate {
     prev_final_update_id: u64, // Final update Id in last stream (i.e., `u` in last stream)
     #[serde(rename = "b")]
     #[serde(deserialize_with = "deserialize_tuple_vec")]
-    bids: Vec<(i64, i64)>,         // Bids to be updated
+    pub bids: Vec<(i64, i64)>,         // Bids to be updated
     #[serde(rename = "a")]
     #[serde(deserialize_with = "deserialize_tuple_vec")]
     asks: Vec<(i64, i64)>,         // Asks to be updated

@@ -5,16 +5,16 @@
   },
   "markets": [
     {
-      "name": "eth",
-      "mm_lot_upper_bound": 100,
-      "lot_size": 100,
-      "min_size": "0.01",
-      "price_precision": 2,
+      "name": "btc",
+      "mm_lot_upper_bound": 10,
+      "lot_size": 1000,
+      "min_size": "0.001",
+      "price_precision": 1,
       "skewing_coefficient": 1.0,
       "symbols": {
-        "binance": "ethusdt",
-        "kucoin": "ETHUSDTM",
-        "bluefin": "ETH-PERP"
+        "binance": "btcusdt",
+        "kucoin": "XBTUSDTM",
+        "bluefin": "BTC-PERP"
       }
     }
   ]
