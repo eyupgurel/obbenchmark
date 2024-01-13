@@ -24,7 +24,7 @@ use crate::sockets::common::OrderBookStream;
 
 table! {
     orders (id) {
-        id -> Integer,
+        id -> BigInt,
         market -> Text,
         price -> BigInt,
         timestamp -> BigInt,
@@ -40,7 +40,7 @@ table! {
 
 const CREATE_ORDERS_TABLE: &str = "
 CREATE TABLE orders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id INTEGER PRIMARY KEY,
     market TEXT NOT NULL,
     price INTEGER NOT NULL,
     timestamp INTEGER NOT NULL,
@@ -73,6 +73,7 @@ pub fn establish_connection() -> SqliteConnection {
 #[derive(Insertable)]
 #[table_name = "orders"]
 struct NewOrder<'a> {
+    id: i64,
     market: &'a str,
     price: i64,
     timestamp: i64,
@@ -101,7 +102,7 @@ struct OrderUpdate<'a> {
 // Function to update an order
 fn update_order<'a>(
     connection: &mut SqliteConnection,
-    order_id: i32,
+    order_id: i64,
     new_price: Option<i64>,
     new_quantity: Option<i64>,
     new_trigger_price: Option<i64>,
@@ -139,18 +140,18 @@ fn generate_random_string(len: usize) -> String {
         .collect()
 }
 
-fn get_orders_ordered_by_price_timestamp(connection: &mut SqliteConnection, perp: &str) -> QueryResult<Vec<(i32, String, i64, i64, i64, i64, i64, i64, i64, String, String)>> {
+fn get_orders_ordered_by_price_timestamp(connection: &mut SqliteConnection, perp: &str) -> QueryResult<Vec<(i64, String, i64, i64, i64, i64, i64, i64, i64, String, String)>> {
     use self::orders::dsl::*;
 
     let result = orders
         .filter(market.eq(perp)) // Filter orders by the specified market
         .order((price.asc(), timestamp.asc())) // Orders by price ascending, then by timestamp ascending
-        .load::<(i32, String, i64, i64, i64, i64, i64, i64, i64, String, String)>(connection);
+        .load::<(i64, String, i64, i64, i64, i64, i64, i64, i64, String, String)>(connection);
 
     result
 }
 
-fn generate_random_order<'a>(markets: &'a [&'a str], makers: &'a Vec<String>, flags: &'a Vec<String>) -> NewOrder<'a> {
+fn generate_random_order<'a>(id:i64, markets: &'a [&'a str], makers: &'a Vec<String>, flags: &'a Vec<String>) -> NewOrder<'a> {
     let mut rng = rand::thread_rng();
     let market = markets[rng.gen_range(0..markets.len())]; // Randomly choose a market
     let maker = &makers[rng.gen_range(0..makers.len())];
@@ -158,6 +159,7 @@ fn generate_random_order<'a>(markets: &'a [&'a str], makers: &'a Vec<String>, fl
     let timestamp = Utc::now().timestamp(); // Generate a real timestamp
 
     NewOrder {
+        id,
         market,
         price: rng.gen_range(50_i64..=250),
         timestamp: timestamp + rng.gen_range(10..=250),
@@ -185,14 +187,14 @@ fn generate_random_makers_and_flags(count: usize) -> (Vec<String>, Vec<String>) 
 
 fn generate_random_orders<'a>(markets: &'a [&'a str], makers: &'a Vec<String>, flags: &'a Vec<String>, count: usize) -> Vec<NewOrder<'a>> {
     let mut orders = Vec::new();
-    for _ in 0..count {
-        let new_order = generate_random_order(markets, makers, flags);
+    for i in 0..count {
+        let new_order = generate_random_order(i as i64, markets, makers, flags);
         orders.push(new_order);
     }
     orders
 }
 
-fn delete_orders_by_ids(connection: &mut SqliteConnection, order_ids: Vec<i32>) -> QueryResult<usize> {
+fn delete_orders_by_ids(connection: &mut SqliteConnection, order_ids: Vec<i64>) -> QueryResult<usize> {
     use self::orders::dsl::*;
 
     //let old_count = orders.count().first::<i64>(connection);
@@ -205,7 +207,7 @@ fn delete_orders_by_ids(connection: &mut SqliteConnection, order_ids: Vec<i32>) 
     Ok(deleted_rows)
 }
 
-fn delete_order_by_id(connection: &mut SqliteConnection, order_id: i32) -> QueryResult<usize> {
+fn delete_order_by_id(connection: &mut SqliteConnection, order_id: i64) -> QueryResult<usize> {
     use self::orders::dsl::*;
 
     let deleted_rows = diesel::delete(orders.filter(id.eq(order_id)))
@@ -222,6 +224,7 @@ fn convert_order_book_entries_to_new_orders<'a>(
 ) -> Vec<NewOrder<'a>> {
     orders_data.iter().map(|&(price, quantity)| {
         NewOrder {
+            id:price,
             market,
             price,
             timestamp: Utc::now().timestamp(),
@@ -466,7 +469,7 @@ mod tests {
         let market = "ETH-PERP";
 
         // Get all order IDs in the database
-        let order_ids: Vec<i32> = orders::table
+        let order_ids: Vec<i64> = orders::table
             .select(orders::id)
             .load(&mut connection)
             .expect("Error loading order IDs");
@@ -475,7 +478,7 @@ mod tests {
         // Randomly select a subset of order IDs to delete
         let mut rng = rand::thread_rng();
 
-        let random_order_ids: Vec<i32> = order_ids
+        let random_order_ids: Vec<i64> = order_ids
             .choose_multiple(&mut rng, 100000) // Choose 10 random IDs
             .cloned()
             .collect();
@@ -520,7 +523,7 @@ mod tests {
 
         // Fetch the updated order and verify the changes
         let updated_order = orders::table.find(1)
-            .first::<(i32, String, i64, i64, i64, i64, i64, i64, i64, String, String)>(&mut connection)
+            .first::<(i64, String, i64, i64, i64, i64, i64, i64, i64, String, String)>(&mut connection)
             .expect("Error fetching updated order");
 
         assert_eq!(updated_order.2, 200); // Check if price is updated to 200
