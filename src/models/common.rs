@@ -43,8 +43,8 @@ pub struct Config {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct OrderBook {
-    pub asks: Vec<(f64, f64)>,
-    pub bids: Vec<(f64, f64)>,
+    pub asks: Vec<(i64, i64)>,
+    pub bids: Vec<(i64, i64)>,
 }
 
 // Custom visitor to handle a vector of tuples
@@ -79,7 +79,7 @@ impl<'de> Visitor<'de> for TupleVecVisitor {
 }
 
 // Deserialize with the custom visitor
-fn deserialize_tuple_vec<'de, D>(deserializer: D) -> Result<Vec<(i64, i64)>, D::Error>
+pub(crate) fn deserialize_tuple_vec<'de, D>(deserializer: D) -> Result<Vec<(i64, i64)>, D::Error>
     where
         D: Deserializer<'de>,
 {
@@ -99,13 +99,38 @@ pub struct BinanceOrderBook {
     #[serde(deserialize_with = "deserialize_tuple_vec")]
     pub bids: Vec<(i64, i64)>
 }
-
 #[derive(Serialize, Deserialize, Debug)]
-pub struct BidAsk {
-    #[serde(rename = "0")]
-    pub price: String,
-    #[serde(rename = "1")]
-    pub qty: String,
+#[serde(rename_all = "camelCase")]
+pub struct DepthUpdate {
+    #[serde(rename = "e")]
+    event_type: String, // Event type
+    #[serde(rename = "E")]
+    event_time: u64,    // Event time
+    #[serde(rename = "T")]
+    transaction_time: u64, // Transaction time
+    #[serde(rename = "s")]
+    symbol: String,     // Symbol
+    #[serde(rename = "U")]
+    first_update_id: u64,  // First update ID in event
+    #[serde(rename = "u")]
+    final_update_id: u64,  // Final update ID in event
+    #[serde(rename = "pu")]
+    prev_final_update_id: u64, // Final update Id in last stream (i.e., `u` in last stream)
+    #[serde(rename = "b")]
+    #[serde(deserialize_with = "deserialize_tuple_vec")]
+    bids: Vec<(i64, i64)>,         // Bids to be updated
+    #[serde(rename = "a")]
+    #[serde(deserialize_with = "deserialize_tuple_vec")]
+    asks: Vec<(i64, i64)>,         // Asks to be updated
+}
+
+impl From<DepthUpdate> for OrderBook {
+    fn from(depth_update: DepthUpdate) -> Self {
+        OrderBook {
+            asks: depth_update.asks,
+            bids: depth_update.bids,
+        }
+    }
 }
 
 pub trait BookOperations {
@@ -114,65 +139,9 @@ pub trait BookOperations {
     fn ask_shift(&self, shift:f64) -> Vec<f64>;
 }
 
-impl BookOperations for OrderBook {
-    fn calculate_mid_prices(&self) -> Vec<f64> {
-        self.asks.iter()
-            .zip(self.bids.iter())
-            .map(|((ask_price, _), (bid_price, _))| (ask_price + bid_price) / 2.0)
-            .collect()
-    }
-    fn bid_shift(&self, shift:f64) -> Vec<f64> {
-        self.bids.iter()
-            .map(|(_, bid_size)| (bid_size + shift))
-            .collect()
-    }
-    fn ask_shift(&self, shift:f64) -> Vec<f64> {
-        self.bids.iter()
-            .map(|(_, bid_size)| (bid_size + shift))
-            .collect()
-    }
 
-}
 
-pub trait SpreadCalculator {
-    fn calculate_spreads(&self, mid_prices1: &[f64], mid_prices2: &[f64]) -> Vec<f64>;
-}
 
-pub fn add(term: &[f64], summand: &[f64]) -> Vec<f64> {
-    term.iter()
-        .zip(summand.iter())
-        .map(|(&term_item, &summand_item)| term_item + summand_item)
-        .collect()
-}
-pub fn subtract(term: &[f64], minuend: &[f64]) -> Vec<f64> {
-        term.iter()
-        .zip(minuend.iter())
-        .map(|(&term_item, &minuend_item)| term_item - minuend_item)
-        .collect()
-}
-
-pub fn divide(dividend: &[f64], divisor: f64) -> Vec<f64> {
-        dividend.iter()
-        .map(|&dividend_item| dividend_item / divisor)
-        .collect()
-}
-
-pub fn multiply(multiplicand: &[f64], multiplier: f64) -> Vec<f64> {
-    multiplicand.iter()
-        .map(|&multiplicand_item| multiplicand_item * multiplier)
-        .collect()
-}
-
-pub fn abs(values: &[f64]) -> Vec<f64> {
-    values.iter()
-        .map(|&value| value.abs())
-        .collect()
-}
-
-#[allow(dead_code)]
-pub fn is_positive(values: &[f64]) -> bool {
-    values[0] > 0.0
-}
 
 pub fn deserialize_optional_f64<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>
     where
@@ -294,22 +263,4 @@ fn convert_bignumber_to_f64(bignumber: &str) -> Result<f64, ConversionError> {
         .map_err(|_| ConversionError::BigDecimalParseError)?;
 
     scaled.to_f64().ok_or(ConversionError::F64ConversionError)
-}
-#[cfg(test)]
-mod tests {
-    use crate::models::common::{BookOperations, OrderBook};
-
-    #[test]
-    fn test_mid_prices() {
-        let order_book = OrderBook {
-            asks: vec![(102.0, 10.0), (103.0, 20.0), (104.0, 30.0)],
-            bids: vec![(98.0, 10.0), (97.0, 20.0), (96.0, 30.0)],
-        };
-
-        let mid_prices = order_book.calculate_mid_prices();
-        let expected_mid_prices = vec![100.0, 100.0, 100.0];
-
-        assert_eq!(mid_prices, expected_mid_prices, "The mid prices should be correctly calculated.");
-    }
-
 }

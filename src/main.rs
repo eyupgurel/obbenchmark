@@ -20,8 +20,9 @@ use chrono::{Utc};
 use crate::env::EnvVars;
 use crate::models::binance_models::DepthUpdate;
 use crate::models::common::{BinanceOrderBook, Config};
+use crate::sockets::binance_depth_update_socket::BinanceDepthUpdateStream;
 use crate::sockets::binance_ob_socket::BinanceOrderBookStream;
-use crate::sockets::common::OrderBookStream;
+use crate::sockets::common::{DepthUpdateStream, OrderBookStream};
 
 table! {
     orders (id) {
@@ -254,8 +255,11 @@ fn main() {
     let market = config.markets.first().unwrap();
     let binance_market = market.symbols.binance.to_owned();
     let binance_market_for_ob = binance_market.clone();
+    let binance_market_for_depth_diff = binance_market.clone();
+
 
     let (tx_binance_ob, rx_binance_ob) = mpsc::channel();
+    let (tx_binance_depth_diff, rx_binance_depth_diff) = mpsc::channel();
 
     let vars: EnvVars = env::env_variables();
 
@@ -318,11 +322,14 @@ fn main() {
 
 
 
+    let binance_websocket_url_for_ob = vars.binance_websocket_url.clone();
+    let binance_websocket_url_for_depth_diff = vars.binance_websocket_url.clone();
+
     let handle_binance_ob = thread::spawn(move || {
         let ob_stream = BinanceOrderBookStream::<DepthUpdate>::new();
         let url = format!(
-            "{}/ws/{}@depth5@100ms",
-            &vars.binance_websocket_url, &binance_market_for_ob
+            "{}/ws/{}@depth20@100ms",
+            &binance_websocket_url_for_ob, &binance_market_for_ob
         );
         ob_stream.stream_ob_socket(
             &url,
@@ -331,7 +338,19 @@ fn main() {
         );
     });
 
-
+// Now you can use binance_websocket_url_for_depth_diff for the second thread
+    let handle_binance_diff = thread::spawn(move || {
+        let diff_depth_stream = BinanceDepthUpdateStream::<crate::models::common::DepthUpdate>::new();
+        let url = format!(
+            "{}/ws/{}@depth@100ms",
+            &binance_websocket_url_for_depth_diff, &binance_market_for_depth_diff
+        );
+        diff_depth_stream.stream_depth_update_socket(
+            &url,
+            &binance_market_for_depth_diff,
+            tx_binance_depth_diff
+        );
+    });
 
 
     loop {
@@ -359,6 +378,18 @@ fn main() {
                 let duration = end_time - start_time;
                 tracing::info!("orderbook refresh duration: {:?}", duration);
                 tracing::info!("binance ob: {:?}", value);
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                // No message from binance yet
+            }
+            Err(mpsc::TryRecvError::Disconnected) => {
+                tracing::debug!("Binance worker has disconnected!");
+            }
+        }
+
+        match rx_binance_depth_diff.try_recv() {
+            Ok(value) => {
+                tracing::info!("binance depth diff: {:?}", value);
             }
             Err(mpsc::TryRecvError::Empty) => {
                 // No message from binance yet
