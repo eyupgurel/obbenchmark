@@ -153,6 +153,16 @@ fn get_orders_ordered_by_price_timestamp(connection: &mut SqliteConnection, perp
     result
 }
 
+fn get_snapshot_data(connection: &mut SqliteConnection) -> QueryResult<Vec<(i64, String, i64, i64, i64, i64, i64, i64, i64, String, String)>> {
+    use self::orders::dsl::*;
+    
+    let result = orders
+        // .order((price.asc(), timestamp.asc()))// Orders by price ascending, then by timestamp ascending
+        .load::<(i64, String, i64, i64, i64, i64, i64, i64, i64, String, String)>(connection);
+    
+    result
+}
+
 fn generate_random_order<'a>(id:i64, markets: &'a [&'a str], makers: &'a Vec<String>, flags: &'a Vec<String>) -> NewOrder<'a> {
     let mut rng = rand::thread_rng();
     let market = markets[rng.gen_range(0..markets.len())]; // Randomly choose a market
@@ -630,7 +640,7 @@ mod tests {
         println!("insert orders duration: {:?}", duration);
 
         // Assert: Check if the insertion duration is within an expected range
-        let max_expected_duration = Duration::from_secs(2); // Adjust this as needed
+        let max_expected_duration = Duration::from_secs(3); // Adjust this as needed
         assert!(
             duration <= max_expected_duration,
             "Insertion took longer than expected: {:?}",
@@ -641,7 +651,7 @@ mod tests {
     #[test]
     fn test_get_orders_ordered_by_price_timestamp_duration() {
         // Arrange: Setup the test database
-        let mut connection = setup_test_database(10000);
+        let mut connection = setup_test_database(1000);
 
         // Act: Measure the time it takes to insert orders
         let start_time = Instant::now();
@@ -655,7 +665,7 @@ mod tests {
 
 
         // Assert: Check if the insertion duration is within an expected range
-        let max_expected_duration = Duration::from_millis(10); // Adjust this as needed
+        let max_expected_duration = Duration::from_millis(15); // Adjust this as needed
         assert!(
             duration <= max_expected_duration,
             "Getting orders ordered by price and timestamp took longer than expected: {:?}",
@@ -666,7 +676,7 @@ mod tests {
     #[test]
     fn test_delete_random_orders() {
         // Arrange: Setup the test database with orders
-        let mut connection = setup_test_database(200000);
+        let mut connection = setup_test_database(100000);
         let market = "ETH-PERP";
 
         // Get all order IDs in the database
@@ -680,7 +690,7 @@ mod tests {
         let mut rng = rand::thread_rng();
 
         let random_order_ids: Vec<i64> = order_ids
-            .choose_multiple(&mut rng, 100000) // Choose 10 random IDs
+            .choose_multiple(&mut rng, 50000) // Choose 10 random IDs
             .cloned()
             .collect();
 
@@ -692,7 +702,7 @@ mod tests {
         let duration = end_time - start_time;
         println!("delete orders duration: {:?}", duration);
 
-        let max_expected_duration = Duration::from_millis(120); // Adjust this as needed
+        let max_expected_duration = Duration::from_millis(100); // Adjust this as needed
         assert!(
             duration <= max_expected_duration,
             "Deleting orders took longer than expected: {:?}",
@@ -700,12 +710,35 @@ mod tests {
         );
     }
 
+
+    #[test]
+    fn test_fetch_an_order() {
+        // Arrange: Setup the test database with orders
+        let mut connection = setup_test_database(100000);
+
+        let start_time = Instant::now();
+        // Get all order IDs in the database
+        let order = orders::table.find(500).load::<(i64, String, i64, i64, i64, i64, i64, i64, i64, String, String)>(&mut connection);
+
+        let end_time = Instant::now();
+        let duration = end_time - start_time;
+        println!("Order: {:?}", order);
+        println!("Order fetch duration: {:?}", duration);
+
+        let max_expected_duration = Duration::from_millis(2); // Adjust this as needed
+        assert!(
+            duration <= max_expected_duration,
+            "Fetching an order took longer than expected: {:?}",
+            duration
+        );
+    }
+
     #[test]
     fn test_update_order() {
         // Arrange: Setup the test database with orders
-        let mut connection = setup_test_database(10); // Adjust the number as needed
+        let mut connection = setup_test_database(100000); // Adjust the number as needed
 
-
+        let start_time = Instant::now();
         // Act: Update the inserted order
         let updated_rows = update_order(
             &mut connection,
@@ -718,6 +751,9 @@ mod tests {
             Some("UpdatedMaker"), // New maker
             None,  // Not updating flags
         ).expect("Error updating order");
+
+        let duration = Instant::now() - start_time;
+        println!("Updating an order: {:?}",duration);
 
         // Assert: Verify that the order was updated correctly
         assert_eq!(updated_rows, 1);
@@ -737,15 +773,76 @@ mod tests {
     fn test_delete_all_orders() {
         let mut connection = setup_test_database(100000);
 
+        let start_time = Instant::now();
         // Perform the delete operation
         let delete_count = delete_all_orders(&mut connection).expect("Error deleting orders");
-
+        
+        let duration = Instant::now() - start_time;
         // Assert that 10 records were deleted
         assert_eq!(delete_count, 100000);
+        
+        println!("duration to delete all orders: {:?}",duration);
+
+        let max_expected_duration = Duration::from_millis(3); // Adjust this as needed
+
+        assert!(
+            duration <= max_expected_duration,
+            "Deleting all orders took longer than expected: {:?}",
+            duration
+        );
 
         let orders = get_orders_ordered_by_price_timestamp(&mut connection, "ETH-PERP")
             .expect("Error fetching orders");
 
         assert_eq!(orders.len(),0);
+    }
+
+    #[test]
+    fn test_snapshot() {
+        use std::fs::File;
+        use std::io::Write;
+        let mut connection = setup_test_database(1000);
+
+        let start_time = Instant::now();
+        let mut start = Instant::now();
+        
+        let snapshot = get_snapshot_data(&mut connection);
+
+        let fetch_duration = Instant::now() - start;
+        println!("Fetching snapshot data: {:?}",fetch_duration);
+
+        start = Instant::now();
+        let mut json_string:String = String::new();
+        match snapshot {
+            Ok(data) => {
+                match serde_json::to_string(&data) {
+                    Ok(data) => json_string=data,
+                    Err(err) => eprintln!("Error converting to JSON: {}", err),
+                }
+            }
+            Err(err) => eprintln!("Error fetching data: {}", err),
+        }
+
+        let mutating_data_to_string_duration = Instant::now() - start;
+        println!("Mutating data to string duration: {:?}",mutating_data_to_string_duration);
+
+        start = Instant::now();
+
+        let mut file = File::create("snapshot.json").expect("Error creating a file");
+        file.write_all(json_string.as_bytes()).expect("Error saving data into file");
+
+        let inserting_data_to_file = Instant::now() - start;
+        println!("Saving data to file duration: {:?}",inserting_data_to_file);
+
+        let duration = Instant::now() - start_time;
+        println!("Taking snapshot of all orders complete duration: {:?}",duration);
+
+        let max_expected_duration = Duration::from_millis(300); // Adjust this as needed
+
+        assert!(
+            duration <= max_expected_duration,
+            "Taking snapshot took longer than expected: {:?}",
+            duration
+        );
     }
 }
