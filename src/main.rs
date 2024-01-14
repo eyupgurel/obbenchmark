@@ -546,7 +546,7 @@ fn main() {
 
 
         match generate_and_process_random_order(&mut connection, &markets, &makers, &flags) {
-            Ok(_) => println!("Order processed successfully"),
+            Ok(_) => {} ,
             Err(e) => println!("Error processing order: {:?}", e),
         }
 
