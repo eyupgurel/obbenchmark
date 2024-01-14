@@ -837,7 +837,7 @@ mod tests {
         let duration = Instant::now() - start_time;
         println!("Taking snapshot of all orders complete duration: {:?}",duration);
 
-        let max_expected_duration = Duration::from_millis(300); // Adjust this as needed
+        let max_expected_duration = Duration::from_millis(20); // Adjust this as needed
 
         assert!(
             duration <= max_expected_duration,
