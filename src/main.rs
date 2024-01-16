@@ -765,40 +765,62 @@ mod tests {
 
     #[test]
     fn test_native_delete_orders() {
-
         let mut order_book: BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>> = set_up_native_test_orders(100000);
 
+        // Get the initial count of all orders
+        let initial_order_count: usize = order_book.values()
+            .map(|price_map| price_map.values().map(|timestamp_map| timestamp_map.len()).sum::<usize>())
+            .sum();
+
+        // Select random orders to verify and delete
         let ordered_orders = get_book_orders_ordered_by_price_timestamp(&order_book);
-        // Select random orders to delete
         let mut rng = rand::thread_rng();
         let orders_to_delete: Vec<(u128, i64, String)> = ordered_orders
             .choose_multiple(&mut rng, 50000)
             .map(|order| (order.price, order.timestamp, order.hash.clone()))
             .collect();
 
+        // Verify existence of orders before deletion
+        for (price, timestamp, hash) in &orders_to_delete {
+            assert!(order_book.contains_key(price));
+            assert!(order_book[price].contains_key(timestamp));
+            assert!(order_book[price][timestamp].contains_key(hash));
+        }
+
         let start_time = Instant::now();
 
         // Act: Delete the selected orders
-        for (price, timestamp, hash) in orders_to_delete {
-            delete_order(
-                &mut order_book,
-                price,
-                timestamp,
-                &hash,
-            );
+        for (price, timestamp, hash) in &orders_to_delete {
+            delete_order(&mut order_book, *price, *timestamp, hash);
         }
 
         let end_time = Instant::now();
         let duration = end_time - start_time;
 
         // Assert: Check if the deletion duration is within an expected range
-        let max_expected_duration = Duration::from_millis(120); // Adjust this as needed
+        let max_expected_duration = Duration::from_millis(110); // Adjust this as needed
         assert!(
             duration <= max_expected_duration,
             "Deleting orders took longer than expected: {:?}",
             duration
         );
+
+
+        // Verify non-existence of orders after deletion
+        for (price, timestamp, hash) in &orders_to_delete {
+            assert!(!order_book.get(price).map_or(false, |p| p.get(timestamp).map_or(false, |t| t.contains_key(hash))));
+        }
+
+        // Assert the count of orders after deletion
+        let remaining_order_count: usize = order_book.values()
+            .map(|price_map| price_map.values().map(|timestamp_map| timestamp_map.len()).sum::<usize>())
+            .sum();
+
+        // Assert that the number of orders deleted is as expected
+        assert_eq!(initial_order_count - remaining_order_count, orders_to_delete.len());
+
     }
+
 
 
 
