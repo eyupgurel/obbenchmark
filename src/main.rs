@@ -12,8 +12,9 @@ use diesel::select;
 
 
 use std::{fmt, fs, iter, thread};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::mpsc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use chrono::{Utc};
@@ -151,6 +152,21 @@ fn get_orders_ordered_by_price_timestamp(connection: &mut SqliteConnection, perp
         .load::<(i64, String, i64, i64, i64, i64, i64, i64, i64, String, String)>(connection);
 
     result
+}
+
+fn get_book_orders_ordered_by_price_timestamp<'a>(
+    order_book: &'a BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>>,
+) -> Vec<&'a BookOrder> {
+    let mut orders: Vec<&'a BookOrder> = Vec::new();
+
+    for (_, price_map) in order_book.iter() {
+        for (_, timestamp_map) in price_map.iter() {
+            for (_, order) in timestamp_map.iter() {
+                orders.push(order);
+            }
+        }
+    }
+    orders
 }
 
 fn get_snapshot_data(connection: &mut SqliteConnection) -> QueryResult<Vec<(i64, String, i64, i64, i64, i64, i64, i64, i64, String, String)>> {
@@ -337,13 +353,69 @@ fn generate_and_process_random_order<'a>(
 
     let end_time = Instant::now();
     let duration = end_time - start_time;
-    println!("match_and_process_orders duration: {:?}", duration);
-
+    //println!("match_and_process_orders duration: {:?}", duration);
     r
 }
 
+#[derive(Debug)]
+pub struct BookOrder {
+    pub is_buy: bool,
+
+    pub reduce_only: bool,
+    // quantity of asset to be traded
+    pub quantity: u128,
+    // price at which trade is to be made
+    pub price: u128,
+    // time of the order
+    pub timestamp:i64,
+    // stop order price
+    pub trigger_price: u128,
+    // leverage (in whole numbers) for trade
+    pub leverage: u128,
+    // time after which order becomes invalid
+    pub expiration:u128,
+    // order hash
+    pub hash:String,
+    // random number,
+    pub salt: u128,
+    // address of order maker
+    pub maker: String,
+    // /// encoded order flags, isBuy, decreasOnly
+    pub flags: String,
+}
+
+fn generate_rand_order() -> BookOrder {
+    let mut rng = rand::thread_rng();
+
+    BookOrder {
+        is_buy: rng.gen_bool(0.5),
+        reduce_only: rng.gen_bool(0.5),
+        quantity: rng.gen_range(1..=1000),
+        price: rng.gen_range(1..=10000),
+        timestamp: rng.gen_range(1..=100000),
+        trigger_price: rng.gen_range(1..=10000),
+        leverage: rng.gen_range(1..=10),
+        expiration: rng.gen_range(1..=10000),
+        hash: rng.gen::<u128>().to_string(),
+        salt: rng.gen::<u128>(),
+        maker: rng.gen::<u128>().to_string(),
+        flags: rng.gen::<u128>().to_string(),
+    }
+}
+
+fn generate_rand_orders(size: usize) -> Vec<BookOrder> {
+    let mut orders = Vec::with_capacity(size);
+
+    for _ in 0..size {
+        let order = generate_rand_order();
+        orders.push(order);
+    }
+
+    orders
+}
 
 fn main() {
+
     let vars: EnvVars = env::env_variables();
     let _guard = env::init_logger(vars.log_level);
     let config_str =
@@ -649,9 +721,86 @@ mod tests {
     }
 
     #[test]
+    fn test_native_insert_orders_duration() {
+        // Arrange: Setup the test database
+        let mut order_book: BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>> = BTreeMap::new();
+        let random_orders = generate_rand_orders(100000);
+
+
+        let start_time = Instant::now();
+
+        for order in random_orders {
+            let price_map = order_book.entry(order.price).or_insert_with(BTreeMap::new);
+            let timestamp_map = price_map.entry(order.timestamp).or_insert_with(HashMap::new);
+            timestamp_map.insert(order.hash.clone(), order);
+        }
+
+
+        let end_time = Instant::now();
+        let duration = end_time - start_time;
+
+
+        let max_expected_duration = Duration::from_millis(200); // Adjust this as needed
+        assert!(
+            duration <= max_expected_duration,
+            "Inserting an order took longer than expected: {:?}",
+            duration
+        );
+    }
+
+    fn set_up_native_test_orders(size: usize) -> BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>> {
+        let mut order_book: BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>> = BTreeMap::new();
+        let random_orders = generate_rand_orders(100000);
+
+        for order in random_orders {
+            let price_map = order_book.entry(order.price).or_insert_with(BTreeMap::new);
+            let timestamp_map = price_map.entry(order.timestamp).or_insert_with(HashMap::new);
+            timestamp_map.insert(order.hash.clone(), order);
+        }
+        order_book
+    }
+
+    #[test]
+    fn test_get_native_orders_ordered_by_price_timestamp_duration() {
+        let order_book: BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>> = set_up_native_test_orders(100000);
+
+        let start_time = Instant::now();
+        let ordered_orders = get_book_orders_ordered_by_price_timestamp(&order_book);
+
+        let end_time = Instant::now();
+        let duration = end_time - start_time;
+
+        let max_expected_duration = Duration::from_millis(25); // Adjust this as needed
+        assert!(
+            duration <= max_expected_duration,
+            "Fetching native orders in price time order took longer than expected: {:?}",
+            duration
+        );
+
+
+        // Assert: Check if the orders are ordered correctly
+        let mut prev_price = u128::MIN;
+        let mut prev_timestamp = i64::MIN;
+
+        for order in ordered_orders.iter() {
+            let price = order.price;
+            let timestamp = order.timestamp;
+
+            //println!("order {:?}", order);
+
+            assert!(price >= prev_price);
+            if price == prev_price {
+                assert!(timestamp >= prev_timestamp);
+            }
+            prev_price = price;
+            prev_timestamp = timestamp;
+        }
+
+    }
+    #[test]
     fn test_get_orders_ordered_by_price_timestamp_duration() {
         // Arrange: Setup the test database
-        let mut connection = setup_test_database(1000);
+        let mut connection = setup_test_database(100000);
 
         // Act: Measure the time it takes to insert orders
         let start_time = Instant::now();
@@ -665,7 +814,7 @@ mod tests {
 
 
         // Assert: Check if the insertion duration is within an expected range
-        let max_expected_duration = Duration::from_millis(15); // Adjust this as needed
+        let max_expected_duration = Duration::from_millis(100); // Adjust this as needed
         assert!(
             duration <= max_expected_duration,
             "Getting orders ordered by price and timestamp took longer than expected: {:?}",
