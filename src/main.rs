@@ -413,6 +413,21 @@ fn generate_rand_orders(size: usize) -> Vec<BookOrder> {
 
     orders
 }
+fn delete_order(
+    order_book: &mut BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>>,
+    price: u128,
+    timestamp: i64,
+    order_hash: &str,
+) -> Option<BookOrder> {
+    // Access the nested maps using the price and timestamp.
+    if let Some(price_map) = order_book.get_mut(&price) {
+        if let Some(timestamp_map) = price_map.get_mut(&timestamp) {
+            // Remove the order with the specific hash.
+            return timestamp_map.remove(order_hash);
+        }
+    }
+    None // Return None if the order was not found.
+}
 
 fn main() {
 
@@ -747,6 +762,45 @@ mod tests {
             duration
         );
     }
+
+    #[test]
+    fn test_native_delete_orders() {
+
+        let mut order_book: BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>> = set_up_native_test_orders(100000);
+
+        let ordered_orders = get_book_orders_ordered_by_price_timestamp(&order_book);
+        // Select random orders to delete
+        let mut rng = rand::thread_rng();
+        let orders_to_delete: Vec<(u128, i64, String)> = ordered_orders
+            .choose_multiple(&mut rng, 50000)
+            .map(|order| (order.price, order.timestamp, order.hash.clone()))
+            .collect();
+
+        let start_time = Instant::now();
+
+        // Act: Delete the selected orders
+        for (price, timestamp, hash) in orders_to_delete {
+            delete_order(
+                &mut order_book,
+                price,
+                timestamp,
+                &hash,
+            );
+        }
+
+        let end_time = Instant::now();
+        let duration = end_time - start_time;
+
+        // Assert: Check if the deletion duration is within an expected range
+        let max_expected_duration = Duration::from_millis(120); // Adjust this as needed
+        assert!(
+            duration <= max_expected_duration,
+            "Deleting orders took longer than expected: {:?}",
+            duration
+        );
+    }
+
+
 
     fn set_up_native_test_orders(size: usize) -> BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>> {
         let mut order_book: BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>> = BTreeMap::new();
