@@ -99,7 +99,7 @@ pub struct BinanceOrderBook {
     #[serde(deserialize_with = "deserialize_tuple_vec")]
     pub bids: Vec<(i64, i64)>
 }
-#[derive(Serialize, Deserialize, Debug)]
+/*#[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct DepthUpdate {
     #[serde(rename = "e")]
@@ -123,12 +123,47 @@ pub struct DepthUpdate {
     #[serde(deserialize_with = "deserialize_tuple_vec")]
     asks: Vec<(i64, i64)>,         // Asks to be updated
 }
+*/
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct DepthUpdate {
+    pub stream: String,
+    pub data: Data,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Data {
+    #[serde(rename = "e")]
+    pub event_type: String,
+    #[serde(rename = "E")]
+    pub event_time: i64,
+    #[serde(rename = "T")]
+    pub t: i64,
+    pub s: String,
+    #[serde(rename = "U")]
+    pub bU: i64,
+    pub u: i64,
+    pub pu: i64,
+    #[serde(rename = "b")]
+    #[serde(deserialize_with = "deserialize_tuple_vec")]
+    pub bids: Vec<(i64, i64)>,
+
+    #[serde(rename = "a")]
+    #[serde(deserialize_with = "deserialize_tuple_vec")]
+    pub asks: Vec<(i64, i64)>,
+}
+
+
+
+
 
 impl From<DepthUpdate> for OrderBook {
     fn from(depth_update: DepthUpdate) -> Self {
         OrderBook {
-            asks: depth_update.asks,
-            bids: depth_update.bids,
+            asks: depth_update.data.asks,
+            bids: depth_update.data.bids,
         }
     }
 }

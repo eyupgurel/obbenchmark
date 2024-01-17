@@ -477,6 +477,12 @@ fn upsert_order(
     timestamp_map.insert(new_order.hash.clone(), new_order);
 }
 
+fn count_orders_in_book(order_book: &BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>>) -> usize {
+    order_book.values()
+        .flat_map(|price_map| price_map.values())
+        .map(|timestamp_map| timestamp_map.len())
+        .sum()
+}
 fn main() {
 
     let mut native_order_book: BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>> = BTreeMap::new();
@@ -561,7 +567,7 @@ fn main() {
     let handle_binance_diff = thread::spawn(move || {
         let diff_depth_stream = BinanceDepthUpdateStream::<crate::models::common::DepthUpdate>::new();
         let url = format!(
-            "{}/ws/{}@depth@100ms",
+            "{}/stream?streams={}@depth@100ms",
             &binance_websocket_url_for_depth_diff, &binance_market_for_depth_diff
         );
         diff_depth_stream.stream_depth_update_socket(
@@ -576,11 +582,11 @@ fn main() {
         match rx_binance_depth_diff.try_recv() {
             Ok(value) => {
 
-                tracing::info!("bids count: {:?}", value.bids.len());
+                tracing::info!("bids count: {:?}", value.data.bids.len());
 
                 let start_time = Instant::now();
 
-                for bid in &value.bids {
+                for bid in &value.data.bids {
                     // Convert the bid to a BookOrder
                     let book_order = BookOrder {
                         is_buy: true, // Assuming these are buy orders; adjust if necessary
@@ -591,7 +597,7 @@ fn main() {
                         trigger_price: 0, // Set according to your logic
                         leverage: 1, // Set according to your logic
                         expiration: 0, // Set according to your logic
-                        hash: generate_random_string(10), // Generate a unique hash for the order
+                        hash: bid.0.to_string(), // Generate a unique hash for the order
                         salt: rand::random(),
                         maker: generate_random_string(10), // Assuming 'maker' is defined in your scope
                         flags: generate_random_string(10), // Assuming 'flags' are defined in your scope
@@ -612,6 +618,9 @@ fn main() {
                 tracing::info!("binance depth diff: {:?}", value);
 
                 let m = generate_and_process_random_order(&mut native_order_book).expect("could not match");
+
+                let order_count = count_orders_in_book(&native_order_book);
+                tracing::info!("Total number of orders: {}", order_count);
 
 
             }
