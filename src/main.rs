@@ -356,7 +356,7 @@ fn generate_and_process_random_order( order_book: &mut BTreeMap<u128, BTreeMap<i
 
     let end_time = Instant::now();
     let duration = end_time - start_time;
-    println!("match_and_process_orders duration: {:?}", duration);
+    println!("match_and_process_orders duration: {:?} match speed: {:?}", duration, 1000000 / duration.as_micros());
     r
 }
 
