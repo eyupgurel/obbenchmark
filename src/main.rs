@@ -426,10 +426,11 @@ fn delete_order(
 ) -> Option<BookOrder> {
     // Access the nested maps using the price and timestamp.
     if let Some(price_map) = order_book.get_mut(&price) {
-        if let Some(timestamp_map) = price_map.get_mut(&timestamp) {
+        order_book.remove(&price);
+/*        if let Some(timestamp_map) = price_map.get_mut(&timestamp) {
             // Remove the order with the specific hash.
             return timestamp_map.remove(order_hash);
-        }
+        }*/
     }
     None // Return None if the order was not found.
 }
@@ -506,7 +507,7 @@ fn main() {
     let client = reqwest::blocking::Client::new();
 
     let order_book_result: Result<BinanceOrderBook, Box<dyn std::error::Error>> = client
-        .get(&"https://fapi.binance.com/fapi/v1/depth?symbol=BTCUSDT&limit=100".to_string())
+        .get(&"https://fapi.binance.com/fapi/v1/depth?symbol=BTCUSDT&limit=1000".to_string())
         .send()
         .map_err(|e| format!("Error making the request: {}", e).into())
         .and_then(|res| {
@@ -602,11 +603,11 @@ fn main() {
                         maker: generate_random_string(10), // Assuming 'maker' is defined in your scope
                         flags: generate_random_string(10), // Assuming 'flags' are defined in your scope
                     };
-                    if(bid.0 > 0) {
+                    if(bid.1 > 0) {
                         // Upsert the order in the in-memory order book
                         upsert_order(&mut native_order_book, book_order);
 
-                    } else {
+                    } else if (bid.1 == 0) {
                         delete_order(&mut native_order_book, book_order.price, book_order.timestamp, &book_order.hash);
                     }
                 }
