@@ -746,6 +746,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "key-node-list"
+version = "0.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "653fee522596ae32adbb1ca91b9553be5b2d8e34556c6148899c9132a7a46295"
+
+[[package]]
 name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -912,6 +918,7 @@ dependencies = [
  "dotenv",
  "env_logger",
  "hex",
+ "key-node-list",
  "log",
  "prost",
  "prost-build",

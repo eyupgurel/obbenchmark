@@ -14,7 +14,7 @@ use diesel::select;
 use std::{fmt, fs, iter, thread};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use chrono::{Utc};
@@ -392,21 +392,35 @@ pub struct BookOrder {
 fn generate_rand_order() -> BookOrder {
     let mut rng = rand::thread_rng();
 
+    // Calculate new range for price
+    let min_price = 41_933_700_000_000_000 / 100_000_000_000;
+    let max_price = 43_537_800_000_000_000 / 100_000_000_000;
+    let price_step = (max_price - min_price) / 99;
+    let price = (min_price + price_step * rng.gen_range(0..=99)) * 100_000_000_000;
+
+    // Calculate new range for quantity
+    let min_quantity = 187_000_000_000 / 1_000_000_000;
+    let max_quantity = 617_000_000_000 / 1_000_000_000;
+    let quantity_step = (max_quantity - min_quantity) / 99;
+    let quantity = (min_quantity + quantity_step * rng.gen_range(0..=99)) * 1_000_000_000;
+
+
     BookOrder {
         is_buy: rng.gen_bool(0.5),
         reduce_only: rng.gen_bool(0.5),
-        quantity: rng.gen_range(187000000000..=617000000000),
-        price: rng.gen_range(41933700000000000..=43537800000000000),
-        timestamp: rng.gen_range(1..=100000),
-        trigger_price: rng.gen_range(1..=10000),
+        quantity,
+        price,
+        timestamp: Utc::now().timestamp(),
+        trigger_price: rng.gen_range(1..=10_000),
         leverage: rng.gen_range(1..=10),
-        expiration: rng.gen_range(1..=10000),
+        expiration: rng.gen_range(1..=10_000),
         hash: rng.gen::<u128>().to_string(),
         salt: rng.gen::<u128>(),
         maker: rng.gen::<u128>().to_string(),
         flags: rng.gen::<u128>().to_string(),
     }
 }
+
 
 fn generate_rand_orders(size: usize) -> Vec<BookOrder> {
     let mut orders = Vec::with_capacity(size);
@@ -645,6 +659,7 @@ mod tests {
     use std::time::{Instant, Duration};
     use diesel::dsl::Order;
     use diesel::sql_query;
+    use key_node_list::KeyValueList;
     use rand::prelude::{IteratorRandom, SliceRandom};
 
     // Helper function to create and populate the test database
@@ -723,7 +738,7 @@ mod tests {
     fn test_native_insert_orders_duration() {
         // Arrange: Setup the test database
         let mut order_book: BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>> = BTreeMap::new();
-        let random_orders = generate_rand_orders(500);
+        let random_orders = generate_rand_orders(100000);
 
 
         let start_time = Instant::now();
@@ -739,7 +754,33 @@ mod tests {
         let duration = end_time - start_time;
 
 
-        let max_expected_duration = Duration::from_millis(1); // Adjust this as needed
+        let max_expected_duration = Duration::from_millis(160); // Adjust this as needed
+        assert!(
+            duration <= max_expected_duration,
+            "Inserting an order took longer than expected: {:?}",
+            duration
+        );
+    }
+
+    #[test]
+    fn test_native_insert_orders_duration_2() {
+        let mut order_book: BTreeMap<u128, KeyValueList<String, BookOrder>> = BTreeMap::new();
+
+        let random_orders = generate_rand_orders(100000);
+
+        let start_time = Instant::now();
+
+        for order in random_orders {
+            let price_list = order_book.entry(order.price).or_insert_with(KeyValueList::new);
+            price_list.push_back(order.hash.clone(), order).unwrap();
+        }
+
+
+        let end_time = Instant::now();
+        let duration = end_time - start_time;
+
+
+        let max_expected_duration = Duration::from_millis(280); // Adjust this as needed
         assert!(
             duration <= max_expected_duration,
             "Inserting an order took longer than expected: {:?}",
@@ -866,6 +907,28 @@ mod tests {
         }
         order_book
     }
+
+    fn set_up_native_test_orders2(size: usize) -> BTreeMap<u128, KeyValueList<String, BookOrder>> {
+        let mut order_book: BTreeMap<u128, KeyValueList<String, BookOrder>> = BTreeMap::new();
+
+        let random_orders = generate_rand_orders(100000);
+
+        for order in random_orders {
+            let price_list = order_book.entry(order.price).or_insert_with(KeyValueList::new);
+            price_list.push_back(order.hash.clone(), order).unwrap();
+        }
+        order_book
+    }
+
+
+    #[test]
+    fn test_update_native_orders_2() {
+        let mut order_book: BTreeMap<u128, KeyValueList<String, BookOrder>> = set_up_native_test_orders2(100000);
+
+
+    }
+
+
 
     #[test]
     fn test_get_native_orders_ordered_by_price_timestamp_duration() {
