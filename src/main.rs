@@ -444,11 +444,24 @@ fn delete_order(
     if let Some(price_map) = order_book.get_mut(&price) {
         if let Some(timestamp_map) = price_map.get_mut(&timestamp) {
             // Remove the order with the specific hash.
-            return timestamp_map.remove(order_hash);
+            let removed_order = timestamp_map.remove(order_hash);
+
+            // Remove the timestamp map if it becomes empty.
+            if timestamp_map.is_empty() {
+                price_map.remove(&timestamp);
+            }
+
+            // Remove the price map if it becomes empty.
+            if price_map.is_empty() {
+                order_book.remove(&price);
+            }
+
+            return removed_order;
         }
     }
     None // Return None if the order was not found.
 }
+
 
  fn update_native_order(
     order_book: &mut BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>>,
@@ -902,7 +915,7 @@ mod tests {
         let duration = end_time - start_time;
 
         // Assert: Check if the deletion duration is within an expected range
-        let max_expected_duration = Duration::from_millis(85); // Adjust this as needed
+        let max_expected_duration = Duration::from_millis(70); // Adjust this as needed
         assert!(
             duration <= max_expected_duration,
             "Deleting orders took longer than expected: {:?}",
