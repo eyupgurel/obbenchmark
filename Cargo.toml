@@ -37,7 +37,6 @@ diesel = { version = "2.1.4", features = ["sqlite"] }
 bigdecimal = "0.4.2"
 thiserror = "1.0.50"
 protoc = "2.28.0"
-key-node-list = "0.0.5"
 generational_token_list = "0.1.5"
 
 [build-dependencies]
