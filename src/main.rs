@@ -24,6 +24,8 @@ use crate::models::common::{BinanceOrderBook, Config};
 use crate::sockets::binance_depth_update_socket::BinanceDepthUpdateStream;
 use crate::sockets::binance_ob_socket::BinanceOrderBookStream;
 use crate::sockets::common::{DepthUpdateStream, OrderBookStream};
+use generational_token_list::GenerationalTokenList;
+use generational_token_list::ItemToken;
 
 table! {
     orders (id) {
@@ -656,7 +658,7 @@ fn main() {
 mod tests {
     use super::*;
     use diesel::connection::SimpleConnection;
-    use std::time::{Instant, Duration};
+    use std::{time::{Instant, Duration}, hash::Hash};
     use diesel::dsl::Order;
     use diesel::sql_query;
     use key_node_list::KeyValueList;
@@ -753,6 +755,8 @@ mod tests {
         let end_time = Instant::now();
         let duration = end_time - start_time;
 
+        println!("duration: {:?}",duration);
+
 
         let max_expected_duration = Duration::from_millis(160); // Adjust this as needed
         assert!(
@@ -779,8 +783,40 @@ mod tests {
         let end_time = Instant::now();
         let duration = end_time - start_time;
 
+        println!("duration: {:?}",duration);
+        let max_expected_duration = Duration::from_millis(10); // Adjust this as needed
+        assert!(
+            duration <= max_expected_duration,
+            "Inserting an order took longer than expected: {:?}",
+            duration
+        );
+    }
 
-        let max_expected_duration = Duration::from_millis(280); // Adjust this as needed
+    #[test]
+    fn test_native_insert_orders_duration_3() {
+        let mut order_book: BTreeMap<u128, GenerationalTokenList<BookOrder>> = BTreeMap::new();
+        let mut orders_map:HashMap<String,ItemToken>=HashMap::new();
+
+        let random_orders = generate_rand_orders(100000);
+
+        let start_time = Instant::now();
+
+        for order in random_orders {
+            let hash = order.hash.clone();
+            // let hash1 = order.hash.clone();  //open it if ran into ownership issue
+            let price_list = order_book.entry(order.price).or_insert_with(GenerationalTokenList::new);
+            let order_ref=price_list.push_back(order);
+            orders_map.insert(hash,order_ref);
+            // price_list.remove(*orders_map.get(&hash1).unwrap()); //here how we can remove the order in O(1) with token ref
+            // println!("hello: {:?}",price_list.get(*orders_map.get(&hash1).unwrap()));
+        }
+
+
+        let end_time = Instant::now();
+        let duration = end_time - start_time;
+
+        println!("duration: {:?}",duration);
+        let max_expected_duration = Duration::from_millis(1); // Adjust this as needed
         assert!(
             duration <= max_expected_duration,
             "Inserting an order took longer than expected: {:?}",
