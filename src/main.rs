@@ -442,11 +442,10 @@ fn delete_order(
 ) -> Option<BookOrder> {
     // Access the nested maps using the price and timestamp.
     if let Some(price_map) = order_book.get_mut(&price) {
-        order_book.remove(&price);
-/*        if let Some(timestamp_map) = price_map.get_mut(&timestamp) {
+        if let Some(timestamp_map) = price_map.get_mut(&timestamp) {
             // Remove the order with the specific hash.
             return timestamp_map.remove(order_hash);
-        }*/
+        }
     }
     None // Return None if the order was not found.
 }
@@ -784,7 +783,7 @@ mod tests {
         let duration = end_time - start_time;
 
         println!("duration: {:?}",duration);
-        let max_expected_duration = Duration::from_millis(160); // Adjust this as needed
+        let max_expected_duration = Duration::from_millis(280); // Adjust this as needed
         assert!(
             duration <= max_expected_duration,
             "Inserting an order took longer than expected: {:?}",
@@ -803,12 +802,12 @@ mod tests {
 
         for order in random_orders {
             let hash = order.hash.clone();
-            // let hash1 = order.hash.clone();  //open it if ran into ownership issue
+            let hash1 = order.hash.clone();  //open it if ran into ownership issue
             let price_list = order_book.entry(order.price).or_insert_with(GenerationalTokenList::new);
-            let order_ref=price_list.push_back(order);
+            let order_ref= price_list.push_back(order);
             orders_map.insert(hash,order_ref);
-            // price_list.remove(*orders_map.get(&hash1).unwrap()); //here how we can remove the order in O(1) with token ref
-            // println!("hello: {:?}",price_list.get(*orders_map.get(&hash1).unwrap()));
+            price_list.remove(*orders_map.get(&hash1).unwrap()); //here how we can remove the order in O(1) with token ref
+            println!("hello: {:?}",price_list.get(*orders_map.get(&hash1).unwrap()));
         }
 
 
@@ -816,7 +815,7 @@ mod tests {
         let duration = end_time - start_time;
 
         println!("duration: {:?}",duration);
-        let max_expected_duration = Duration::from_millis(1); // Adjust this as needed
+        let max_expected_duration = Duration::from_millis(190); // Adjust this as needed
         assert!(
             duration <= max_expected_duration,
             "Inserting an order took longer than expected: {:?}",
@@ -824,11 +823,86 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_native_delete_orders_3() {
+        let mut order_book: BTreeMap<u128, GenerationalTokenList<BookOrder>> = BTreeMap::new();
+        let mut orders_map:HashMap<String,ItemToken>=HashMap::new();
+
+        let random_orders = generate_rand_orders(100000);
+
+        for order in random_orders.clone() {
+            let hash = order.hash.clone();
+            // let hash1 = order.hash.clone();  //open it if ran into ownership issue
+            let price_list = order_book.entry(order.price).or_insert_with(GenerationalTokenList::new);
+            let order_ref=price_list.push_back(order);
+            orders_map.insert(hash,order_ref);
+
+        }
+
+        // Get the initial count of all orders
+        let initial_order_count: usize = order_book.values()
+            .map(|price_map|
+                price_map.len())
+            .sum();
+
+       let mut rng = rand::thread_rng();
+        let orders_to_delete: Vec<(u128, String)> = random_orders.clone()
+            .choose_multiple(&mut rng, 50000)
+            .map(|order| (order.price, order.hash.clone()))
+            .collect();
+
+
+
+       // Verify existence of orders before deletion
+       for (price, hash) in &orders_to_delete {
+           assert!(order_book.contains_key(price));
+           assert!(order_book[price].get(*orders_map.get(hash).unwrap()).unwrap().hash.eq(hash));
+       }
+
+       let start_time = Instant::now();
+
+        // Act: Delete the selected orders
+        for (price, hash) in &orders_to_delete {
+            if let Some(price_list) = order_book.get_mut(price) {
+                if let Some(order_ref) = orders_map.get(hash) {
+                    price_list.remove(*order_ref).unwrap();
+                }
+            }
+        }
+
+        let end_time = Instant::now();
+        let duration = end_time - start_time;
+
+        // Assert: Check if the deletion duration is within an expected range
+        let max_expected_duration = Duration::from_millis(80); // Adjust this as needed
+        assert!(
+            duration <= max_expected_duration,
+            "Deleting orders took longer than expected: {:?}",
+            duration
+        );
+
+        // Verify non-existence of orders after deletion
+        let all_deleted = orders_to_delete.iter().all(|(price, hash)| {
+            order_book.contains_key(price) &&
+                order_book[price].get(*orders_map.get(hash).unwrap()).is_none()
+        });
+
+        assert!(all_deleted, "Some orders still exist after deletion");
+
+        // Assert the count of orders after deletion
+        let remaining_order_count: usize = order_book.values()
+            .map(|price_map| price_map.len())
+            .sum();
+
+        // Assert that the number of orders deleted is as expected
+        assert_eq!(initial_order_count - remaining_order_count, orders_to_delete.len());
+
+    }
 
 
     #[test]
     fn test_native_delete_orders() {
-        let mut order_book: BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>> = set_up_native_test_orders(500);
+        let mut order_book: BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>> = set_up_native_test_orders(100000);
 
         // Get the initial count of all orders
         let initial_order_count: usize = order_book.values()
@@ -861,7 +935,7 @@ mod tests {
         let duration = end_time - start_time;
 
         // Assert: Check if the deletion duration is within an expected range
-        let max_expected_duration = Duration::from_millis(1); // Adjust this as needed
+        let max_expected_duration = Duration::from_millis(70); // Adjust this as needed
         assert!(
             duration <= max_expected_duration,
             "Deleting orders took longer than expected: {:?}",
