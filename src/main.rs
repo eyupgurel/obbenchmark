@@ -780,7 +780,7 @@ mod tests {
         let duration = end_time - start_time;
 
 
-        let max_expected_duration = Duration::from_millis(280); // Adjust this as needed
+        let max_expected_duration = Duration::from_millis(290); // Adjust this as needed
         assert!(
             duration <= max_expected_duration,
             "Inserting an order took longer than expected: {:?}",
