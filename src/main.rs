@@ -14,7 +14,7 @@ use diesel::select;
 use std::{fmt, fs, iter, thread};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use chrono::{Utc};
@@ -24,6 +24,8 @@ use crate::models::common::{BinanceOrderBook, Config};
 use crate::sockets::binance_depth_update_socket::BinanceDepthUpdateStream;
 use crate::sockets::binance_ob_socket::BinanceOrderBookStream;
 use crate::sockets::common::{DepthUpdateStream, OrderBookStream};
+use generational_token_list::GenerationalTokenList;
+use generational_token_list::ItemToken;
 
 table! {
     orders (id) {
@@ -392,21 +394,35 @@ pub struct BookOrder {
 fn generate_rand_order() -> BookOrder {
     let mut rng = rand::thread_rng();
 
+    // Calculate new range for price
+    let min_price = 41_933_700_000_000_000 / 100_000_000_000;
+    let max_price = 43_537_800_000_000_000 / 100_000_000_000;
+    let price_step = (max_price - min_price) / 99;
+    let price = (min_price + price_step * rng.gen_range(0..=99)) * 100_000_000_000;
+
+    // Calculate new range for quantity
+    let min_quantity = 187_000_000_000 / 1_000_000_000;
+    let max_quantity = 617_000_000_000 / 1_000_000_000;
+    let quantity_step = (max_quantity - min_quantity) / 99;
+    let quantity = (min_quantity + quantity_step * rng.gen_range(0..=99)) * 1_000_000_000;
+
+
     BookOrder {
         is_buy: rng.gen_bool(0.5),
         reduce_only: rng.gen_bool(0.5),
-        quantity: rng.gen_range(187000000000..=617000000000),
-        price: rng.gen_range(41933700000000000..=43537800000000000),
-        timestamp: rng.gen_range(1..=100000),
-        trigger_price: rng.gen_range(1..=10000),
+        quantity,
+        price,
+        timestamp: Utc::now().timestamp(),
+        trigger_price: rng.gen_range(1..=10_000),
         leverage: rng.gen_range(1..=10),
-        expiration: rng.gen_range(1..=10000),
+        expiration: rng.gen_range(1..=10_000),
         hash: rng.gen::<u128>().to_string(),
         salt: rng.gen::<u128>(),
         maker: rng.gen::<u128>().to_string(),
         flags: rng.gen::<u128>().to_string(),
     }
 }
+
 
 fn generate_rand_orders(size: usize) -> Vec<BookOrder> {
     let mut orders = Vec::with_capacity(size);
@@ -426,14 +442,26 @@ fn delete_order(
 ) -> Option<BookOrder> {
     // Access the nested maps using the price and timestamp.
     if let Some(price_map) = order_book.get_mut(&price) {
-        order_book.remove(&price);
-/*        if let Some(timestamp_map) = price_map.get_mut(&timestamp) {
+        if let Some(timestamp_map) = price_map.get_mut(&timestamp) {
             // Remove the order with the specific hash.
-            return timestamp_map.remove(order_hash);
-        }*/
+            let removed_order = timestamp_map.remove(order_hash);
+
+            // Remove the timestamp map if it becomes empty.
+            if timestamp_map.is_empty() {
+                price_map.remove(&timestamp);
+            }
+
+            // Remove the price map if it becomes empty.
+            if price_map.is_empty() {
+                order_book.remove(&price);
+            }
+
+            return removed_order;
+        }
     }
     None // Return None if the order was not found.
 }
+
 
  fn update_native_order(
     order_book: &mut BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>>,
@@ -642,7 +670,7 @@ fn main() {
 mod tests {
     use super::*;
     use diesel::connection::SimpleConnection;
-    use std::time::{Instant, Duration};
+    use std::{time::{Instant, Duration}, hash::Hash};
     use diesel::dsl::Order;
     use diesel::sql_query;
     use rand::prelude::{IteratorRandom, SliceRandom};
@@ -723,7 +751,7 @@ mod tests {
     fn test_native_insert_orders_duration() {
         // Arrange: Setup the test database
         let mut order_book: BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>> = BTreeMap::new();
-        let random_orders = generate_rand_orders(500);
+        let random_orders = generate_rand_orders(100000);
 
 
         let start_time = Instant::now();
@@ -738,8 +766,10 @@ mod tests {
         let end_time = Instant::now();
         let duration = end_time - start_time;
 
+        println!("duration: {:?}",duration);
 
-        let max_expected_duration = Duration::from_millis(1); // Adjust this as needed
+
+        let max_expected_duration = Duration::from_millis(160); // Adjust this as needed
         assert!(
             duration <= max_expected_duration,
             "Inserting an order took longer than expected: {:?}",
@@ -747,11 +777,38 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_native_insert_orders_duration_3() {
+        let mut order_book: BTreeMap<u128, GenerationalTokenList<BookOrder>> = BTreeMap::new();
+        let mut orders_map:HashMap<String,ItemToken>=HashMap::new();
 
+        let random_orders = generate_rand_orders(100000);
+
+        let start_time = Instant::now();
+
+        for order in random_orders {
+            let hash = order.hash.clone();
+            let price_list = order_book.entry(order.price).or_insert_with(GenerationalTokenList::new);
+            let order_ref= price_list.push_back(order);
+            orders_map.insert(hash,order_ref);
+        }
+
+
+        let end_time = Instant::now();
+        let duration = end_time - start_time;
+
+        println!("duration: {:?}",duration);
+        let max_expected_duration = Duration::from_millis(140); // Adjust this as needed
+        assert!(
+            duration <= max_expected_duration,
+            "Inserting an order took longer than expected: {:?}",
+            duration
+        );
+    }
 
     #[test]
     fn test_native_delete_orders() {
-        let mut order_book: BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>> = set_up_native_test_orders(500);
+        let mut order_book: BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>> = set_up_native_test_orders(100000);
 
         // Get the initial count of all orders
         let initial_order_count: usize = order_book.values()
@@ -784,7 +841,7 @@ mod tests {
         let duration = end_time - start_time;
 
         // Assert: Check if the deletion duration is within an expected range
-        let max_expected_duration = Duration::from_millis(1); // Adjust this as needed
+        let max_expected_duration = Duration::from_millis(70); // Adjust this as needed
         assert!(
             duration <= max_expected_duration,
             "Deleting orders took longer than expected: {:?}",
@@ -806,6 +863,84 @@ mod tests {
         assert_eq!(initial_order_count - remaining_order_count, orders_to_delete.len());
 
     }
+
+    #[test]
+    fn test_native_delete_orders_3() {
+        let mut order_book: BTreeMap<u128, GenerationalTokenList<BookOrder>> = BTreeMap::new();
+        let mut orders_map:HashMap<String,ItemToken>=HashMap::new();
+
+        let random_orders = generate_rand_orders(100000);
+
+        for order in random_orders.clone() {
+            let hash = order.hash.clone();
+            // let hash1 = order.hash.clone();  //open it if ran into ownership issue
+            let price_list = order_book.entry(order.price).or_insert_with(GenerationalTokenList::new);
+            let order_ref=price_list.push_back(order);
+            orders_map.insert(hash,order_ref);
+
+        }
+
+        // Get the initial count of all orders
+        let initial_order_count: usize = order_book.values()
+            .map(|price_map|
+                price_map.len())
+            .sum();
+
+       let mut rng = rand::thread_rng();
+        let orders_to_delete: Vec<(u128, String)> = random_orders.clone()
+            .choose_multiple(&mut rng, 50000)
+            .map(|order| (order.price, order.hash.clone()))
+            .collect();
+
+
+
+       // Verify existence of orders before deletion
+       for (price, hash) in &orders_to_delete {
+           assert!(order_book.contains_key(price));
+           assert!(order_book[price].get(*orders_map.get(hash).unwrap()).unwrap().hash.eq(hash));
+       }
+
+       let start_time = Instant::now();
+
+        // Act: Delete the selected orders
+        for (price, hash) in &orders_to_delete {
+            if let Some(price_list) = order_book.get_mut(price) {
+                if let Some(order_ref) = orders_map.get(hash) {
+                    price_list.remove(*order_ref).unwrap();
+                }
+            }
+        }
+
+        let end_time = Instant::now();
+        let duration = end_time - start_time;
+
+        // Assert: Check if the deletion duration is within an expected range
+        let max_expected_duration = Duration::from_millis(70); // Adjust this as needed
+        assert!(
+            duration <= max_expected_duration,
+            "Deleting orders took longer than expected: {:?}",
+            duration
+        );
+
+        // Verify non-existence of orders after deletion
+        let all_deleted = orders_to_delete.iter().all(|(price, hash)| {
+            order_book.contains_key(price) &&
+                order_book[price].get(*orders_map.get(hash).unwrap()).is_none()
+        });
+
+        assert!(all_deleted, "Some orders still exist after deletion");
+
+        // Assert the count of orders after deletion
+        let remaining_order_count: usize = order_book.values()
+            .map(|price_map| price_map.len())
+            .sum();
+
+        // Assert that the number of orders deleted is as expected
+        assert_eq!(initial_order_count - remaining_order_count, orders_to_delete.len());
+
+    }
+
+
 
     #[test]
     fn test_update_native_orders() {
@@ -866,6 +1001,7 @@ mod tests {
         }
         order_book
     }
+
 
     #[test]
     fn test_get_native_orders_ordered_by_price_timestamp_duration() {

@@ -497,6 +497,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "generational-arena"
+version = "0.2.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "877e94aff08e743b651baaea359664321055749b398adff8740a7399af7796e7"
+dependencies = [
+ "cfg-if",
+]
+
+[[package]]
+name = "generational_token_list"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed4fdc5df26adcabafe3634081d9ad9cbf03dcd69d068e0be0336323d62eee73"
+dependencies = [
+ "generational-arena",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -911,6 +929,7 @@ dependencies = [
  "diesel",
  "dotenv",
  "env_logger",
+ "generational_token_list",
  "hex",
  "log",
  "prost",
