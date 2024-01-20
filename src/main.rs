@@ -907,6 +907,10 @@ mod tests {
             if let Some(price_list) = order_book.get_mut(price) {
                 if let Some(order_ref) = orders_map.get(hash) {
                     price_list.remove(*order_ref).unwrap();
+                    orders_map.remove(hash);
+                    if price_list.head() == None {
+                        order_book.remove(price);
+                    }
                 }
             }
         }
