@@ -19,13 +19,14 @@ use rand::distributions::Alphanumeric;
 use rand::Rng;
 use chrono::{Utc};
 use crate::env::EnvVars;
-use crate::models::binance_models::DepthUpdate;
-use crate::models::common::{BinanceOrderBook, Config};
-use crate::sockets::binance_depth_update_socket::BinanceDepthUpdateStream;
-use crate::sockets::binance_ob_socket::BinanceOrderBookStream;
 use crate::sockets::common::{DepthUpdateStream, OrderBookStream};
 use generational_token_list::GenerationalTokenList;
 use generational_token_list::ItemToken;
+use rdkafka::ClientConfig;
+use rdkafka::config::RDKafkaLogLevel;
+use rdkafka::consumer::{Consumer, StreamConsumer};
+use rdkafka::Message;
+use serde_derive::{Deserialize, Serialize};
 
 table! {
     orders (id) {
@@ -362,9 +363,7 @@ fn generate_and_process_random_order( order_book: &mut BTreeMap<u128, BTreeMap<i
     r
 }
 
-#[derive(Debug)]
-#[derive(Clone)]
-#[derive(PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct BookOrder {
     pub is_buy: bool,
 
@@ -512,158 +511,71 @@ fn count_orders_in_book(order_book: &BTreeMap<u128, BTreeMap<i64, HashMap<String
         .map(|timestamp_map| timestamp_map.len())
         .sum()
 }
-fn main() {
+
+#[tokio::main]
+async fn main() {
 
     let mut native_order_book: BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>> = BTreeMap::new();
 
     let vars: EnvVars = env::env_variables();
     let _guard = env::init_logger(vars.log_level);
-    let config_str =
-        fs::read_to_string("src/config/config.json").expect("Unable to read config.json");
-    let config: Config = serde_json::from_str(&config_str).expect("JSON was not well-formatted");
-    let market = config.markets.first().unwrap();
-    let binance_market = market.symbols.binance.to_owned();
-    let binance_market_for_ob = binance_market.clone();
-    let binance_market_for_depth_diff = binance_market.clone();
-
-
-    //let (tx_binance_ob, rx_binance_ob) = mpsc::channel();
-    let (tx_binance_depth_diff, rx_binance_depth_diff) = mpsc::channel();
 
     let vars: EnvVars = env::env_variables();
 
-    let client = reqwest::blocking::Client::new();
+    println!("Brokers: {}", vars.brokers);
+    println!("Consumption Topic: {}", vars.event_topic);
 
-    let order_book_result: Result<BinanceOrderBook, Box<dyn std::error::Error>> = client
-        .get(&"https://fapi.binance.com/fapi/v1/depth?symbol=BTCUSDT&limit=1000".to_string())
-        .send()
-        .map_err(|e| format!("Error making the request: {}", e).into())
-        .and_then(|res| {
-            res.text()
-                .map_err(|e| format!("Error reading the response body: {}", e).into())
-        })
-        .and_then(|body|
-            serde_json::from_str(&body).
-                map_err(Into::into));
+    let consumer: StreamConsumer   = ClientConfig::new()
+        .set("bootstrap.servers", vars.brokers)
+        .set("group.id", "testing-consumer-group")
+        .set("enable.auto.commit", "false")
+        .set("enable.partition.eof", "false")
+        .set("partition.assignment.strategy", "range")
+        //.set("statistics.interval.ms", "30000")
+        //.set("auto.offset.reset", "smallest")
+        .set_log_level(RDKafkaLogLevel::Debug)
+        .create()
+        .expect("Consumer creation failed");
 
-
-    let order_book = order_book_result
-        .map(|response| response)
-        .map_err(|e| {
-            tracing::error!("Error: {}", e);
-            e
-        })
-        .unwrap();
+    // start consuming the topic
+    consumer
+        .subscribe(&[vars.event_topic.as_str()])
+        .expect("Topic subscribe failed");
 
 
-    for bid in order_book.bids.iter() {
-        // Convert the bid to a BookOrder
-        let book_order = BookOrder {
-            is_buy: true, // Assuming these are buy orders; adjust if necessary
-            reduce_only: false, // Set according to your logic
-            quantity: bid.1 as u128,
-            price: bid.0 as u128,
-            timestamp: Utc::now().timestamp(),
-            trigger_price: 0, // Set according to your logic
-            leverage: 1, // Set according to your logic
-            expiration: 0, // Set according to your logic
-            hash: generate_random_string(10), // Generate a unique hash for the order
-            salt: rand::random(),
-            maker: "SomeMaker".to_string(), // Replace with actual maker
-            flags: "SomeFlags".to_string(), // Replace with actual flags
-        };
-
-        // Upsert the order in the native order book
-        upsert_order(&mut native_order_book, book_order);
-    }
-
-    // Print the native order book after upserting
-    for (price, timestamp_map) in &native_order_book {
-        println!("Price: {}", price);
-        for (timestamp, orders) in timestamp_map {
-            println!("\tTimestamp: {}", timestamp);
-            for (hash, order) in orders {
-                println!("\t\tHash: {}", hash);
-                println!("\t\tOrder: {:?}", order);
-            }
-        }
-    }
-
-
-    let binance_websocket_url_for_depth_diff = vars.binance_websocket_url.clone();
-
-// Now you can use binance_websocket_url_for_depth_diff for the second thread
-    let handle_binance_diff = thread::spawn(move || {
-        let diff_depth_stream = BinanceDepthUpdateStream::<crate::models::common::DepthUpdate>::new();
-        let url = format!(
-            "{}/stream?streams={}@depth@100ms",
-            &binance_websocket_url_for_depth_diff, &binance_market_for_depth_diff
-        );
-        diff_depth_stream.stream_depth_update_socket(
-            &url,
-            &binance_market_for_depth_diff,
-            tx_binance_depth_diff
-        );
-    });
-
-
+    println!("Subscribed to provided topic...");
+    // loop and wait till receive message on topic
     loop {
-        match rx_binance_depth_diff.try_recv() {
-            Ok(value) => {
+        match consumer.recv().await {
+            Err(e) => println!("Kafka error: {}", e),
+            Ok(msg) => {
 
-                tracing::info!("bids count: {:?}", value.data.bids.len());
+                let owned_message = msg.detach();
+                let data_str = std::str::from_utf8(owned_message.payload().expect("Invalid payload data")).expect("Invalid UTF-8");
+                let data_string = data_str.to_string();
+                let book_order: BookOrder = serde_json::from_str(&data_string).expect("Can't parse");
 
-                let start_time = Instant::now();
+                if(book_order.quantity > 0) {
+                    // Upsert the order in the in-memory order book
+                    upsert_order(&mut native_order_book, book_order);
 
-                for bid in &value.data.bids {
-                    // Convert the bid to a BookOrder
-                    let book_order = BookOrder {
-                        is_buy: true, // Assuming these are buy orders; adjust if necessary
-                        reduce_only: false, // Set according to your logic
-                        quantity: bid.1 as u128,
-                        price: bid.0 as u128,
-                        timestamp: Utc::now().timestamp(),
-                        trigger_price: 0, // Set according to your logic
-                        leverage: 1, // Set according to your logic
-                        expiration: 0, // Set according to your logic
-                        hash: bid.0.to_string(), // Generate a unique hash for the order
-                        salt: rand::random(),
-                        maker: generate_random_string(10), // Assuming 'maker' is defined in your scope
-                        flags: generate_random_string(10), // Assuming 'flags' are defined in your scope
-                    };
-                    if(bid.1 > 0) {
-                        // Upsert the order in the in-memory order book
-                        upsert_order(&mut native_order_book, book_order);
-
-                    } else if (bid.1 == 0) {
-                        delete_order(&mut native_order_book, book_order.price, book_order.timestamp, &book_order.hash);
-                    }
+                } else if (book_order.quantity == 0) {
+                    delete_order(&mut native_order_book, book_order.price, book_order.timestamp, &book_order.hash);
                 }
-
-                let end_time = Instant::now();
-                let duration = end_time - start_time;
-                tracing::info!("orderbook update duration: {:?}", duration);
-
-                tracing::info!("binance depth diff: {:?}", value);
-
-                let m = generate_and_process_random_order(&mut native_order_book).expect("could not match");
 
                 let order_count = count_orders_in_book(&native_order_book);
                 tracing::info!("Total number of orders: {}", order_count);
-
-
-            }
-            Err(mpsc::TryRecvError::Empty) => {
-                // No message from binance yet
-            }
-            Err(mpsc::TryRecvError::Disconnected) => {
-                tracing::debug!("Binance worker has disconnected!");
+                if(order_count>100){
+                    let m = generate_and_process_random_order(&mut native_order_book).expect("could not match");
+                }
             }
         }
+    };
 
-    }
 
 }
+
+
 
 
 #[cfg(test)]

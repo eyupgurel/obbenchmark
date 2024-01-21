@@ -24,6 +24,8 @@ pub struct EnvVars {
     pub market_making_trigger_bps: f64,
     pub market_making_time_throttle_period: u64,
     pub log_level: String,
+    pub brokers: String,
+    pub event_topic: String,
 }
 
 /**
@@ -92,6 +94,9 @@ pub fn env_variables() -> EnvVars {
     // misc
     let log_level = std::env::var("LOG_LEVEL").expect("LOG_LEVEL must be set.");
 
+    let brokers = std::env::var("KAFKA_BROKERS").expect("KAFKA_BROKERS must be set.");
+    let event_topic = std::env::var("EVENT_TOPIC").expect("EVENT_TOPIC must be set.");
+
     return EnvVars {
         bluefin_on_boarding_url,
         bluefin_endpoint,
@@ -112,6 +117,8 @@ pub fn env_variables() -> EnvVars {
         market_making_trigger_bps,
         market_making_time_throttle_period,
         log_level,
+        brokers,
+        event_topic
     };
 }
 
