@@ -36,7 +36,7 @@ async fn main() {
     let consumer: StreamConsumer   = ClientConfig::new()
         .set("bootstrap.servers", "localhost:9092")
         .set("group.id", "testing-consumer-group")
-        .set("enable.auto.commit", "false")
+        .set("enable.auto.commit", "true")
         .set("enable.partition.eof", "false")
         .set("partition.assignment.strategy", "range")
         //.set("statistics.interval.ms", "30000")
@@ -75,6 +75,7 @@ async fn main() {
                 if counter == 100000 {
                     let end = Instant::now();
                     println!("Duration of consumption of 100k messages: {:?}",end-start);
+                    counter=0;
                 }
                 
             }
