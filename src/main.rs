@@ -70,49 +70,42 @@ fn match_and_process_orders(
     price_time_map: &mut HashMap<String,(u128,i64)>,
     mut quantity: u128
 ) -> Option<Match> {
-    let mut orders_to_process = Vec::new();
-    let mut total_matched_quantity = 0;
+    let mut orders_to_delete = Vec::new();
+    let mut orders_to_update = Vec::new();
     let mut matched = Match::new();
 
     'outer: for (&price, price_map) in order_book.iter() {
         for (&timestamp, timestamp_map) in price_map.iter() {
-            for (_, order) in timestamp_map.iter() {
+            for (hash, order) in timestamp_map.iter() {
                 if quantity == 0 {
-                    break 'outer; // This breaks out of all loops, not just the innermost one
+                    break 'outer;
                 }
 
                 let matched_quantity = std::cmp::min(order.quantity, quantity);
                 quantity -= matched_quantity;
-                total_matched_quantity += matched_quantity;
-
                 matched.add(price, matched_quantity);
 
                 if order.quantity <= matched_quantity {
-                    orders_to_process.push((price, timestamp, order.hash.clone(), order.quantity));
+                    orders_to_delete.push((price, timestamp, hash.clone()));
                 } else {
                     let updated_quantity = order.quantity - matched_quantity;
-                    orders_to_process.push((price, timestamp, order.hash.clone(), updated_quantity));
+                    orders_to_update.push((price, timestamp, hash.clone(), updated_quantity));
                 }
             }
         }
     }
 
-    // Perform mutations based on the collected data
-    for (price, timestamp, hash, matched_quantity) in orders_to_process {
-        if let Some(order) = order_book.get_mut(&price)
-            .and_then(|price_map| price_map.get_mut(&timestamp))
-            .and_then(|timestamp_map| timestamp_map.get_mut(&hash)) {
-            if order.quantity <= matched_quantity {
-                delete_order(order_book, price_time_map, &hash);
-            } else {
-                let updated_quantity = order.quantity - matched_quantity;
-                update_order_quantity(order_book, price, timestamp, &hash, updated_quantity);
-            }
-        }
+    for (price, timestamp, hash) in orders_to_delete {
+        delete_order(order_book, price_time_map, &hash);
+    }
+
+    for (price, timestamp, hash, updated_quantity) in orders_to_update {
+        update_order_quantity(order_book, price, timestamp, &hash, updated_quantity);
     }
 
     Some(matched)
 }
+
 
 
 fn generate_and_process_random_order( order_book: &mut BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>>,
