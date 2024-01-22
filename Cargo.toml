@@ -36,7 +36,6 @@ rand = "0.8.5"
 bigdecimal = "0.4.2"
 thiserror = "1.0.50"
 protoc = "2.28.0"
-generational_token_list = "0.1.5"
 rdkafka = "0.36.2"
 
 [build-dependencies]
