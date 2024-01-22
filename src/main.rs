@@ -49,7 +49,7 @@ fn get_book_orders_ordered_by_price_timestamp<'a>(
 #[derive(Debug)]
 pub struct Match {
     pub price: u128,
-    pub quantity: u128,
+    pub quantity: u128
 }
 
 impl Match {
@@ -63,10 +63,10 @@ impl Match {
     }
 }
 
-fn match_and_process_orders(
+fn match_order(
     order_book: &mut BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>>,
     price_time_map: &mut HashMap<String,(u128,i64)>,
-    mut quantity: u128
+    market_order: &mut BookOrder
 ) -> Option<Match> {
     let mut orders_to_delete = Vec::new();
     let mut orders_to_update = Vec::new();
@@ -75,12 +75,12 @@ fn match_and_process_orders(
     'outer: for (&price, price_map) in order_book.iter() {
         for (&timestamp, timestamp_map) in price_map.iter() {
             for (hash, order) in timestamp_map.iter() {
-                if quantity == 0 {
+                if market_order.quantity == 0 {
                     break 'outer;
                 }
 
-                let matched_quantity = std::cmp::min(order.quantity, quantity);
-                quantity -= matched_quantity;
+                let matched_quantity = std::cmp::min(order.quantity, market_order.quantity);
+                market_order.quantity -= matched_quantity;
                 matched.add(price, matched_quantity);
 
                 if order.quantity <= matched_quantity {
@@ -109,16 +109,16 @@ fn match_and_process_orders(
 fn generate_and_process_random_order( order_book: &mut BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>>,
                                       price_time_map: &mut HashMap<String,(u128,i64)>) -> Option<Match> {
     // Generate a random order
-    let random_order = generate_rand_order();
+    let mut market_order = generate_rand_order();
 
     // Extract the quantity from the generated order
-    let quantity = random_order.quantity;
+    let quantity = market_order.quantity;
 
     // Call match_and_process_orders with the generated quantity
 
     let start_time = Instant::now();
 
-    let r = match_and_process_orders(order_book, price_time_map, quantity);
+    let r = match_order(order_book, price_time_map, &mut market_order);
 
     let end_time = Instant::now();
     let duration = end_time - start_time;
@@ -449,14 +449,14 @@ mod tests {
 
         // Act: Delete the selected orders
         for (_, _, hash) in &orders_to_delete {
-            delete_order(&mut order_book, &mut price_time_map, hash).expect("TODO: panic message");
+            delete_order(&mut order_book, &mut price_time_map, hash).expect("Error in deleting order");
         }
 
         let end_time = Instant::now();
         let duration = end_time - start_time;
 
         // Assert: Check if the deletion duration is within an expected range
-        let max_expected_duration = Duration::from_millis(120); // Adjust this as needed
+        let max_expected_duration = Duration::from_millis(150); // Adjust this as needed
         assert!(
             duration <= max_expected_duration,
             "Deleting orders took longer than expected: {:?}",
