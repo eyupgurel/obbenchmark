@@ -94,7 +94,7 @@ fn match_and_process_orders(
     }
 
     for (price, timestamp, hash) in orders_to_delete {
-        delete_order(order_book, price_time_map, &hash);
+        delete_order(order_book, price_time_map, &hash).expect("TODO: panic message");
     }
 
     for (price, timestamp, hash, updated_quantity) in orders_to_update {
@@ -178,7 +178,7 @@ fn generate_rand_order() -> BookOrder {
         trigger_price: rng.gen_range(1..=10_000),
         leverage: rng.gen_range(1..=10),
         expiration: rng.gen_range(1..=10_000),
-        hash: rng.gen::<u128>().to_string(),
+        hash: generate_random_string(30), // Generate a unique hash for the order
         salt: rng.gen::<u128>(),
         maker: rng.gen::<u128>().to_string(),
         flags: rng.gen::<u128>().to_string(),
@@ -449,7 +449,7 @@ mod tests {
 
         // Act: Delete the selected orders
         for (_, _, hash) in &orders_to_delete {
-            delete_order(&mut order_book, &mut price_time_map, hash);
+            delete_order(&mut order_book, &mut price_time_map, hash).expect("TODO: panic message");
         }
 
         let end_time = Instant::now();
