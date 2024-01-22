@@ -555,6 +555,9 @@ async fn main() {
                 let data_string = data_str.to_string();
                 let book_order: BookOrder = serde_json::from_str(&data_string).expect("Can't parse");
 
+
+                let start = Instant::now();
+
                 if(book_order.quantity > 0) {
                     // Upsert the order in the in-memory order book
                     upsert_order(&mut native_order_book, book_order);
@@ -563,11 +566,22 @@ async fn main() {
                     delete_order(&mut native_order_book, book_order.price, book_order.timestamp, &book_order.hash);
                 }
 
+                let update_duration = Instant::now() - start;
+
+                println!("OB update duration: {:?} OB update speed: {:?}", update_duration,
+                    if update_duration.as_micros() > 0 {
+                        1000000 / update_duration.as_micros()
+                    } else {
+                        u128::MAX
+                    });
+
                 let order_count = count_orders_in_book(&native_order_book);
                 tracing::info!("Total number of orders: {}", order_count);
                 if(order_count>100){
                     let m = generate_and_process_random_order(&mut native_order_book).expect("could not match");
                 }
+
+
             }
         }
     };
