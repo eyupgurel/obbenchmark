@@ -238,7 +238,7 @@ fn delete_order(
 }
 
 
- fn update_native_order(
+ fn update_order(
     order_book: &mut BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>>,
     price: u128,
     timestamp: i64,
@@ -298,7 +298,7 @@ fn count_orders_in_book(order_book: &BTreeMap<u128, BTreeMap<i64, HashMap<String
 #[tokio::main]
 async fn main() {
 
-    let mut native_order_book: BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>> = BTreeMap::new();
+    let mut order_book: BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>> = BTreeMap::new();
     let mut price_time_map: HashMap<String,(u128,i64)> = HashMap::new();
 
     let vars: EnvVars = env::env_variables();
@@ -344,10 +344,10 @@ async fn main() {
 
                 if(book_order.quantity > 0) {
                     // Upsert the order in the in-memory order book
-                    upsert_order(&mut native_order_book, &mut price_time_map, book_order);
+                    upsert_order(&mut order_book, &mut price_time_map, book_order);
 
                 } else if (book_order.quantity == 0) {
-                    delete_order(&mut native_order_book, &mut price_time_map, &book_order.hash)
+                    delete_order(&mut order_book, &mut price_time_map, &book_order.hash)
                         .map(|_removed_order| {
                             println!("order removed");// Handle successful deletion. This block can be empty if there's nothing specific to do.
                         })
@@ -367,10 +367,10 @@ async fn main() {
                         u128::MAX
                     });
 
-                let order_count = count_orders_in_book(&native_order_book);
+                let order_count = count_orders_in_book(&order_book);
                 tracing::info!("Total number of orders: {}", order_count);
                 if(order_count>100){
-                    let m = generate_and_process_random_order(&mut native_order_book, &mut price_time_map).expect("could not match");
+                    let m = generate_and_process_random_order(&mut order_book, &mut price_time_map).expect("could not match");
                 }
 
 
@@ -392,7 +392,7 @@ mod tests {
 
 
     #[test]
-    fn test_native_insert_orders_duration() {
+    fn test_insert_orders_duration() {
         // Arrange: Setup the test database
         let mut order_book: BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>> = BTreeMap::new();
         let random_orders = generate_rand_orders(100000);
@@ -422,8 +422,8 @@ mod tests {
     }
 
     #[test]
-    fn test_native_delete_orders() {
-        let (mut order_book, mut price_time_map): (BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>>,HashMap<String,(u128,i64)>) = set_up_native_test_orders(100000);
+    fn test_delete_orders() {
+        let (mut order_book, mut price_time_map): (BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>>,HashMap<String,(u128,i64)>) = set_up_test_orders(100000);
 
         // Get the initial count of all orders
         let initial_order_count: usize = order_book.values()
@@ -480,8 +480,8 @@ mod tests {
     }
 
     #[test]
-    fn test_update_native_orders() {
-        let (mut order_book, mut price_time_map): (BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>>,HashMap<String,(u128,i64)>) = set_up_native_test_orders(100000);
+    fn test_update_orders() {
+        let (mut order_book, mut price_time_map): (BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>>,HashMap<String,(u128,i64)>) = set_up_test_orders(100000);
 
         // Select random orders to update
         let ordered_orders = get_book_orders_ordered_by_price_timestamp(&order_book);
@@ -503,7 +503,7 @@ mod tests {
         // Act: Update the selected orders
         for (price, timestamp, hash) in &orders_to_update {
             let updated_order_data = generate_rand_order(); // Function to generate a new BookOrder with updated values
-            update_native_order(&mut order_book, *price, *timestamp, hash, updated_order_data);
+            update_order(&mut order_book, *price, *timestamp, hash, updated_order_data);
         }
 
         let end_time = Instant::now();
@@ -527,7 +527,7 @@ mod tests {
 
 
 
-    fn set_up_native_test_orders(size: usize) -> (BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>>,HashMap<String,(u128,i64)>) {
+    fn set_up_test_orders(size: usize) -> (BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>>,HashMap<String,(u128,i64)>) {
         let mut order_book: BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>> = BTreeMap::new();
         let mut price_time_map: HashMap<String,(u128,i64)> = HashMap::new();
         let random_orders = generate_rand_orders(100000);
@@ -548,8 +548,8 @@ mod tests {
 
 
     #[test]
-    fn test_get_native_orders_ordered_by_price_timestamp_duration() {
-        let (order_book, price_time_map): (BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>>,HashMap<String,(u128,i64)>) = set_up_native_test_orders(500);
+    fn test_get_orders_ordered_by_price_timestamp_duration() {
+        let (order_book, price_time_map): (BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>>,HashMap<String,(u128,i64)>) = set_up_test_orders(500);
 
         let start_time = Instant::now();
         let ordered_orders = get_book_orders_ordered_by_price_timestamp(&order_book);
@@ -638,7 +638,7 @@ mod tests {
 
     #[test]
     fn test_upsert_order() {
-        let (mut order_book, mut price_time_map): (BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>>,HashMap<String,(u128,i64)>) = set_up_native_test_orders(100);
+        let (mut order_book, mut price_time_map): (BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>>,HashMap<String,(u128,i64)>) = set_up_test_orders(100);
         // Choose a random order to update
         let mut rng = rand::thread_rng();
         let random_order_to_update = order_book.values()
