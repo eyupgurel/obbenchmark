@@ -272,21 +272,26 @@ fn update_order_quantity(
 
 fn upsert_order(
     order_book: &mut BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>>,
-    price_time_map: &mut HashMap<String,(u128,i64)>,
+    price_time_map: &mut HashMap<String, (u128, i64)>,
     new_order: BookOrder
 ) {
-    let price_map = order_book.entry(new_order.price).or_insert_with(BTreeMap::new);
-    let timestamp_map = price_map.entry(new_order.timestamp).or_insert_with(HashMap::new);
-
-    let order_hash = new_order.hash.to_owned();
+    let order_hash = new_order.hash.clone();
     let price = new_order.price;
     let timestamp = new_order.timestamp;
 
-    // Upsert the order: update if exists, insert if not
-    timestamp_map.insert(new_order.hash.clone(), new_order);
+    // Insert into price_time_map first
+    price_time_map.insert(order_hash.clone(), (price, timestamp));
 
-    price_time_map.insert(order_hash,(price, timestamp));
+    // Then insert the new_order
+    order_book
+        .entry(price)
+        .or_default()
+        .entry(timestamp)
+        .or_default()
+        .insert(order_hash, new_order); // new_order is moved here
 }
+
+
 
 fn count_orders_in_book(order_book: &BTreeMap<u128, BTreeMap<i64, HashMap<String, BookOrder>>>) -> usize {
     order_book.values()
